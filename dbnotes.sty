@@ -1,0 +1,104 @@
+\newcommand{\CourseName}{15-721 Advanced Database Systems}
+\newcommand{\CourseProf}{Andy Pavlo}
+\newcommand{\CourseProfURL}{http://www.cs.cmu.edu/~pavlo/}
+\newcommand{\CourseSemester}{Spring 2018}
+\newcommand{\CourseURL}{http://15721.courses.cs.cmu.edu/spring2018/}
+% \newcommand{\CourseLecture}{}
+
+\newcommand{\PDFTitle}{\CourseName\texorpdfstring{\\}{ }(\CourseSemester) -
+\lecturenumber\texorpdfstring{\\}{ }\lecturename}
+
+\newcommand{\marginTop}{1in}
+\newcommand{\marginBot}{1in}
+\newcommand{\marginLeft}{1in}
+\newcommand{\marginOuter}{1in}
+
+%% ==================================================================
+%% PACKAGES
+%% ==================================================================
+
+\usepackage[pdftex,
+            letterpaper,
+            top=\marginTop,
+            bottom=\marginBot,
+            left=\marginLeft,
+            outer=\marginOuter]{geometry}
+
+\usepackage{hyperref}
+\hypersetup{%
+    hyperfigures=false,
+    hyperindex=false,
+    pdfauthor={\CourseProf},
+    pdftitle = {\PDFTitle},
+    bookmarksopen = {true},
+    colorlinks=false,
+    pdfborder={ 0 0 0 }
+}
+
+\usepackage[compact]{titlesec}
+% \usepackage[sc,osf]{mathpazo}
+\usepackage{times}
+\usepackage[scaled]{inconsolata}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+
+\usepackage{listings}
+\lstset{
+    language=SQL,
+    columns=flexible,
+    frame=single,                       % adds a frame around the code
+}
+\lstset{
+    basicstyle=\footnotesize\ttfamily,
+    breaklines=true}
+
+%% ==================================================================
+%% SPACING
+%% ==================================================================
+    
+\newcommand\tab[1][0.5cm]{\hspace*{#1}}
+
+% Section Headers
+\titlespacing*{\subsection}{0pt}{0pt}{-0.05in}
+
+\newcommand{\question}[2] {\vspace{.25in} \hrule\vspace{0.5em}
+\noindent{\bf #1: #2} \vspace{0.5em}
+\hrule \vspace{.10in}}
+\renewcommand{\part}[1] {\vspace{.10in} {\bf (#1)}}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt plus 1pt}
+
+% Itemize
+\let\tempone\itemize
+\let\temptwo\enditemize
+\renewenvironment{itemize}{\tempone\addtolength{\itemsep}{0.15\baselineskip}}{\temptwo}
+
+% Enumerate
+\let\tempone\enumerate
+\let\temptwo\endenumerate
+\renewenvironment{enumerate}{\tempone\addtolength{\itemsep}{0.15\baselineskip}}{\temptwo}
+
+
+%% ==================================================================
+%% DOCUMENT SETUP
+%% ==================================================================
+
+\pagestyle{fancyplain}
+\lhead{\fancyplain{}{Lecture \lecturenumber}}      % Note the different brackets!
+\rhead{\fancyplain{}{\lecturename}}
+\chead{\fancyplain{}{\CourseName}}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries}{\thesection}{1em}{}[{\titlerule[0.8pt]}]
+
+\author{
+   { \href{\CourseURL}{\CourseName\texorpdfstring{ }{ }(\CourseSemester)}} \\
+   { Carnegie Mellon University} \\
+   { \href{\CourseProfURL}{Prof. \CourseProf} } \\
+}
+\title{\bf Lecture \lecturenumber: \lecturename\vspace*{-0.25in}}
+\date{}
