@@ -1,0 +1,172 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{1}
+\newcommand{\lecturename}{Course Introduction and History of DBMSs}
+\newcommand{\lecturedata}{2018-01-17}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+\begin{center}
+    Act 153 requires Andy to prove he is not a child molestor
+\end{center}
+
+\section{Course Objectives}
+\begin{itemize}
+    \item Learn about modern practices in database internals and systems programming
+    \item Students will become proficient in
+    \begin{itemize}
+        \item Writing correct + performant code
+        \item Proper documentation + testing
+        \item Code reviews
+        \item Working on a large code base
+    \end{itemize}
+    \item Course will be focused on only \textbf{single node} systems
+    \item Will cover state-of-the-art topics, not classic DBMSs
+\end{itemize}
+
+\section{Database History Observations}
+\begin{itemize}
+    \item Stonebreaker says a lot of the issues relevant a long time ago are still relevant today
+    \item The "SQL vs NoSQL" debate is reminiscent of the "Relational vs CODASYL" debate
+\end{itemize}
+
+\section{1960s}
+\begin{itemize}
+    \item First DBMS - IDS
+    \begin{itemize}
+        \item Integrated Data Stonebreaker
+        \item Developed internally at GE in the early 1960s
+        \item GE sold their computing division to Honeywell in 1969
+        \item Had a Network Data Model and Tuple-at-a-time queries
+    \end{itemize}
+    \item CODASYL
+    \begin{itemize}
+        \item COBOL people got together and proposed a standard for how programs will access a database
+        \item Lead by Charles Bachman
+        \item Network Data Model made complex queries difficult and was easily corruptable
+    \end{itemize}
+    \item IBM IMS
+    \begin{itemize}
+        \item Information Management systems
+        \item Early database system developed to keep track of purchase orders for Apollo moon mission
+        \item Hierarchical data Model
+        \begin{itemize}
+            \item Had a lot of duplicate data and no data independence
+        \end{itemize}
+        \item Programmer-defined physical storage format
+        \item Tuple-at-a-time queries
+    \end{itemize}
+\end{itemize}
+
+\section{1970s}
+\begin{itemize}
+    \item Relational Model
+    \begin{itemize}
+        \item Ted Codd Was mathematician working at IBM Research
+        \item Saw developers constantly changing their codebase when changing their database schema
+        \item Created Database abstraction to avoid this maintenence
+        \begin{itemize}
+            \item Store database in simple data structures
+            \item Access data through high-level language
+            \item Physical storage left up to implementation
+        \end{itemize}
+    \end{itemize}
+    \item Early implementations of relatinal DBMSs
+    \begin{itemize}
+        \item System R - IBM Research
+        \item INGRES - U.C. Berkeley
+        \item Oracle - Larry Ellison
+    \end{itemize}
+\end{itemize}
+
+\section{1980s}
+\begin{itemize}
+    \item Relatiional model wins
+    \begin{itemize}
+        \item IBM comes out with DB2 in 1983
+        \item "SEQUEL" becomes the standard ("SQL")
+    \end{itemize}
+    \item Many new "enterprise" DBMSs but Oracle wins marketplace
+    \item Stonebraker leaves INGRES and creates Postgres
+    \item Object Related Databases
+    \begin{itemize}
+        \item Argued that how people wrote code and how data is stored in a database is different
+        \item Avoid "relational object impedance mismatch" by tightly coupling objects and Database
+        \item Few of these original DBMSs from the 1980s still exist today
+        \item Issues: Performed badly with complex queries and the systems had no standard API
+    \end{itemize}
+\end{itemize}
+
+\section{1990s}
+\begin{itemize}
+    \item No major advancements in database systems or application workloads
+    \item Major Events:
+    \begin{itemize}
+        \item Microsoft forks Sybase and creates SQL Server
+        \item MySQL is written as a replacement for mSQL
+        \item Postgres gets SQL support
+        \item SQLite started in early 2000
+    \end{itemize}
+\end{itemize}
+
+\section{2000s}
+\begin{itemize}
+    \item All the big players were heavyweight and expensive. Open-source databases were missing important features
+    \item Many companies wrote their own custom middleware to scale out database across single-node DBMS instances
+    \item Rise of the special purpose OLAP DBMSs - Data Warehouses
+    \begin{itemize}
+        \item Distributed / Shared-Nothing
+        \item Relational / SQL
+        \item Usually closed-source
+        \item Significant performance benefits from using decomposition Storage Model
+    \end{itemize}
+    \item NoSQL Systems
+    \begin{itemize}
+        \item Focus on high-availability and high-scalability
+        \item Schemaless
+        \item Non-relational data models
+        \item No ACID transactions
+        \item Custom APIs instead of SQL
+        \item Usually open-source
+    \end{itemize}
+\end{itemize}
+
+\section{2010s}
+\begin{itemize}
+    \item NewSQL Systems: Provide same performance for OLTP workloads as NoSQL DBMSs without giving up ACID
+    \begin{itemize}
+        \item Relational / SQL
+        \item Distributed
+        \item Usually closed-srouce
+    \end{itemize}
+    \item Hybrid Systems
+    \begin{itemize}
+        \item HTAP: Hybrid Transactional-Analytical Processing
+        \item Execute fast OLTP like a NewSQL system while also executing complex OLAP queries like a data warehouse system
+        \begin{itemize}
+            \item Distributed / Shared-Nothing
+            \item Relational/SQL
+            \item Mixed open/closed-source
+        \end{itemize}
+    \end{itemize}
+    \item Cloud Systems
+    \begin{itemize}
+        \item First database-as-a-service (DBaaS) offerings were "containerized" versions of existing DBMSs
+        \item There are new DBMSs that are designed from scratch explicitly for running in a cloud environment
+    \end{itemize}
+    \item Specialized Systems
+    \begin{itemize}
+        \item Shared Disk
+        \item Embedded
+        \item Time-Series
+        \item Multi model
+        \item Blockchain
+    \end{itemize}
+\end{itemize}
+
+\end{document}
