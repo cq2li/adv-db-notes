@@ -1,7 +1,7 @@
 \newcommand{\CourseName}{15-721 Advanced Database Systems}
 \newcommand{\CourseProf}{Andy Pavlo}
 \newcommand{\CourseProfURL}{http://www.cs.cmu.edu/~pavlo/}
-\newcommand{\CourseSemester}{Spring 2018}
+\newcommand{\CourseSemester}{Spring 2018\xspace}
 \newcommand{\CourseURL}{http://15721.courses.cs.cmu.edu/spring2018/}
 % \newcommand{\CourseLecture}{}
 
@@ -39,12 +39,15 @@
 % \usepackage[sc,osf]{mathpazo}
 \usepackage{times}
 \usepackage[scaled]{inconsolata}
-
+\usepackage{xspace}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{mathtools}
 \usepackage{fancyhdr}
 \usepackage{graphicx}
+\usepackage{lastpage}
+\usepackage{enumitem}
+\usepackage[numbers,sort,compress]{natbib}
 
 \usepackage{listings}
 \lstset{
@@ -78,27 +81,38 @@
 \renewenvironment{itemize}{\tempone\addtolength{\itemsep}{0.15\baselineskip}}{\temptwo}
 
 % Enumerate
-\let\tempone\enumerate
-\let\temptwo\endenumerate
-\renewenvironment{enumerate}{\tempone\addtolength{\itemsep}{0.15\baselineskip}}{\temptwo}
+% \let\tempone\enumerate
+% \let\temptwo\endenumerate
+% \renewenvironment{enumerate}{\tempone\addtolength{\itemsep}{0.15\baselineskip}}{\temptwo}
 
+\setlist[itemize]{noitemsep, topsep=0pt}
+
+%% ==================================================================
+%% MACROS
+%% ==================================================================
+
+\newcommand{\todo}[1]{}
+\newcommand{\dbSys}[1]{\textbf{#1}\xspace}
 
 %% ==================================================================
 %% DOCUMENT SETUP
 %% ==================================================================
 
 \pagestyle{fancyplain}
-\lhead{\fancyplain{}{Lecture \lecturenumber}}      % Note the different brackets!
+\renewcommand{\headrulewidth}{2pt}
+\lhead{\fancyplain{}{\CourseSemester $ $-- Lecture \#\lecturenumber}}
 \rhead{\fancyplain{}{\lecturename}}
-\chead{\fancyplain{}{\CourseName}}
+\cfoot{\fancyplain{}{\CourseName \\ Page \thepage\ of \pageref{LastPage}}}
+
 
 \titleformat{\section}
   {\normalfont\Large\bfseries}{\thesection}{1em}{}[{\titlerule[0.8pt]}]
 
 \author{
-   { \href{\CourseURL}{\CourseName\texorpdfstring{ }{ }(\CourseSemester)}} \\
-   { Carnegie Mellon University} \\
+   { \textbf{\href{\CourseURL}{\CourseName\texorpdfstring{ }{ }(\CourseSemester)}} } \\
+   { \url{\CourseURL} } \\
+   { Carnegie Mellon University } \\
    { \href{\CourseProfURL}{Prof. \CourseProf} } \\
 }
-\title{\bf Lecture \lecturenumber: \lecturename\vspace*{-0.25in}}
+\title{\bf Lecture \#\lecturenumber: \lecturename\vspace*{-0.25in}}
 \date{}
