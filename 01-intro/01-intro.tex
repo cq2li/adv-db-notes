@@ -58,7 +58,9 @@
         for how programs will access a database.
         
         \item
-        \textit{Network Data Model} made complex queries difficult and was easily corruptible.
+        The \textit{Network Data Model} made it difficult to write complex queries due to the sets 
+        that maintained relationships. It also made these early systems more susceptible to 
+        corruption~\cite{stonebraker2005goes}.
     \end{itemize}
     
     \item \textbf{IBM Information Management System (IMS)}~\cite{klein12}
@@ -138,22 +140,19 @@
 \section{The 1990s}
 \begin{itemize}
     \item No major advancements in database systems or application workloads.
-    \item Major Events:
-    \begin{itemize}
-        \item
-        Microsoft forks \dbSys{Sybase} and creates \dbSys{SQL Server} for Windows NT.
-        
-        \item
-        \dbSys{MySQL} is written as a replacement for \dbSys{mSQL}.
-        
-        \item
-        Illustra (the commercial version of \dbSys{Postgres}) gets bought by \dbSys{Informix}. 
-        Graduate students at Berkeley take the original academic \dbSys{Postgres} code and adds 
-        support for SQL.
-        
-        \item
-        \dbSys{SQLite} started in early 2000.
-    \end{itemize}
+    \item
+    Microsoft forks \dbSys{Sybase} and creates \dbSys{SQL Server} for Windows NT.
+    
+    \item
+    \dbSys{MySQL} is written as a replacement for \dbSys{mSQL}.
+    
+    \item
+    Illustra (the commercial version of \dbSys{Postgres}) gets bought by \dbSys{Informix}. 
+    Graduate students at Berkeley take the original academic \dbSys{Postgres} code and adds 
+    support for SQL.
+    
+    \item
+    \dbSys{SQLite} started in early 2000.
 \end{itemize}
 
 \section{The 2000s}
@@ -228,6 +227,6 @@
 % ==================================================================
 \newpage
 \bibliographystyle{abbrvnat}
-\bibliography{01-introduction}
+\bibliography{01-intro}
 
 \end{document}

@@ -35,10 +35,12 @@
     pdfborder={ 0 0 0 }
 }
 
-\usepackage[compact]{titlesec}
+% Font Packages
 % \usepackage[sc,osf]{mathpazo}
 \usepackage{times}
 \usepackage[scaled]{inconsolata}
+
+% Other Packages
 \usepackage{xspace}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -47,6 +49,10 @@
 \usepackage{graphicx}
 \usepackage{lastpage}
 \usepackage{enumitem}
+\usepackage{titling}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage[dvipsnames]{color}
 \usepackage[numbers,sort,compress]{natbib}
 
 \usepackage{listings}
@@ -68,9 +74,6 @@
 % Section Headers
 \titlespacing*{\subsection}{0pt}{0pt}{-0.05in}
 
-\newcommand{\question}[2] {\vspace{.25in} \hrule\vspace{0.5em}
-\noindent{\bf #1: #2} \vspace{0.5em}
-\hrule \vspace{.10in}}
 \renewcommand{\part}[1] {\vspace{.10in} {\bf (#1)}}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{5pt plus 1pt}
@@ -87,6 +90,9 @@
 
 \setlist[itemize]{noitemsep, topsep=0pt}
 
+% This moves the title up vertically on the first page
+\setlength{\droptitle}{-0.8in}
+
 %% ==================================================================
 %% MACROS
 %% ==================================================================
@@ -99,14 +105,16 @@
 %% ==================================================================
 
 \pagestyle{fancyplain}
-\renewcommand{\headrulewidth}{2pt}
+\renewcommand{\headrulewidth}{2.5pt}
+\renewcommand{\footrulewidth}{1pt}
+
 \lhead{\fancyplain{}{\CourseSemester $ $-- Lecture \#\lecturenumber}}
 \rhead{\fancyplain{}{\lecturename}}
-\cfoot{\fancyplain{}{\CourseName \\ Page \thepage\ of \pageref{LastPage}}}
+\cfoot{\fancyplain{}{\href{\CourseURL}{\CourseName} \\ Page \thepage\ of \pageref{LastPage}}}
 
 
 \titleformat{\section}
-  {\normalfont\Large\bfseries}{\thesection}{1em}{}[{\titlerule[0.8pt]}]
+  {\normalfont\Large\bfseries}{\thesection}{1em}{}[{\titlerule[0.5pt]}]
 
 \author{
    { \textbf{\href{\CourseURL}{\CourseName\texorpdfstring{ }{ }(\CourseSemester)}} } \\
@@ -114,5 +122,5 @@
    { Carnegie Mellon University } \\
    { \href{\CourseProfURL}{Prof. \CourseProf} } \\
 }
-\title{\bf Lecture \#\lecturenumber: \lecturename\vspace*{-0.25in}}
+\title{\bf Lecture \#\lecturenumber: \lecturename\vspace*{-0.35in}}
 \date{}
