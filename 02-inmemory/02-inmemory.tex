@@ -47,14 +47,14 @@
     \begin{itemize}
         \item In a disk oriented DBMS, the system assumes that a txn could stall at any time when it tries to access data that is not in memory
         \item Concurrency allows the DBMS to execute other txns at the same time to improve performance
-        \item locks are stored in separate data structure to avoid being swapped to disk
-        \item Lock
+        \item Locks are stored in separate data structure to avoid being swapped to disk
+        \item Lock~\cite{a16-graefe}
         \begin{itemize}
             \item Protects the database logical contents from other txns
             \item Held for txn duration
             \item Need to be able to rollback changes
         \end{itemize}
-        \item Latch
+        \item Latch~\cite{a16-graefe}
         \begin{itemize}
             \item Protects the critical sections of the DBMS internal data structure from other threads
             \item Held for operation duration
@@ -71,8 +71,9 @@
 
 \section{In-Memory DBMS}
 \begin{itemize}
+    \item In a disk-based system, only approximately 7\% of instructions are done on actual work~\cite{looking-glass}
     \item The system architecture assumes that the primary storage location of the database is \textbf{permanently} in memory
-    \item If I/O is no longer the slowest resource, much of the DBMS architecture will have to change account for other bottlenecks
+    \item If I/O is no longer the slowest resource, much of the DBMS architecture will have to change account for other bottlenecks~\cite{non-volatile}
     \begin{itemize}
         \item Locking/latching
         \item Cache-line misses
@@ -120,9 +121,18 @@
         \item System also still takes checkpoints, however, there are different methods for checkpointing
     \end{itemize}
     \item Non-Volatile memory: Emerging hardware that is similar to speed of DRAM with the persistence guarantees of an SSD
-
+    \item Notable In-memory DBMSs
+    \begin{itemize}
+        \item \dbSys{TimesTen}: Multi-process, shared memory DBMS from Oracle~\cite{TimesTen}
+        \item \dbSys{Dali}: Multi-process shared memory storage manager using memory mapped files~\cite{Dali}
+    \end{itemize}
 \end{itemize}
 
-
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{02-inmemory}
 
 \end{document}
