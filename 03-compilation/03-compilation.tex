@@ -77,8 +77,8 @@ execution pattern on different inputs.
 Benefits of Code Specialization:
 \begin{itemize}
     \item
-    Attribute types are knwon \textit{a priori}; data access function calls can be converted to 
-    inline pointer casting.
+    Attribute types are known \textit{a priori}; data access function calls can be converted to 
+    in-line pointer casting.
     
     \item
     Predicates are known \textit{a priori}; the DBMS can evaluate them using primitive 
@@ -88,8 +88,6 @@ Benefits of Code Specialization:
     No function calls in loops; this allows the compiler to efficiently distribute data to 
     registers and increase cache reuse.
     
-    \item
-    All possible because relational DBMSs have schemas.
 \end{itemize}
 
 %% ==================================================================
@@ -113,7 +111,7 @@ code~\cite{krikellas10}:
     link it to the DBMS process, and invoke the exec function to execute the query.
     
     \item
-    The generated query code can invoke any other function in the DMBS.
+    The generated query code can invoke any other function in the DBMS.
     
     \item
     This allows it to use all the same components as interpreted queries (e.g. 
@@ -149,7 +147,7 @@ native code~\cite{neumann11}.
     The DBMS can compile queries into native code using the LLVM toolkit~\cite{lattner04}:
     \begin{itemize}
         \item
-        Collection of modular and reusable compiler and toolchain technologies.
+        Collection of modular and reusable compiler and tool chain technologies.
         
         \item
         Core component is a low-level programming language (IR) that is similar to assembly.
@@ -180,7 +178,7 @@ model~\cite{kohn18}:
     Execute the IR in an interpreter while compiling the query in a background thread.
     
     \item
-    When the compiled query is ready, seamlesly replace the interpretive execution.
+    When the compiled query is ready, seamlessly replace the interpretive execution.
 \end{enumerate}
 
 %% ==================================================================
@@ -234,47 +232,75 @@ model~\cite{kohn18}:
         data formats stored on HDFS.
     \end{itemize}
     
-    \item Actian Vector (former VectorWise)~\cite{raducanu13}
+    \item \dbSys{Actian Vector} (formerly \dbSys{VectorWise})~\cite{raducanu13}
     \begin{itemize}
-        \item Pre-compile thousands of "primitives" that perform basic operations on typed data
-        \item The DBMS then executes a query plan that invokes these primitives at runtime
+        \item
+        Pre-compile thousands of ``primitives'' that perform basic operations on typed data.
+        
+        \item
+        The DBMS then executes a query plan that invokes these primitives at runtime.
     \end{itemize}
-    \item MemSQL (Pre-2016)
+    
+    \item \dbSys{MemSQL} (pre-2016)
     \begin{itemize}
-        \item Performs the same C/C++ code generation as HIQUE and then invokes gcc
-        \item Converts all queries into a parameterized form and caches the compiled query plan
+        \item
+        Performs the same C/C++ code generation as HIQUE~\cite{krikellas10} and then invokes 
+        \texttt{gcc}.
+        
+        \item
+        Converts all queries into a parameterized form and caches the compiled query plan.
     \end{itemize}
-    \item MemSQL (2016 - Present)
+
+    \item \dbSys{MemSQL} (Since 2016)~\cite{paroski16}
     \begin{itemize}
-        \item A query plan is converted into an imperative plan expressed in a high-level imperative DSL
-        \item MemSQL Programming Language (MLP), think of it like a C++ dialect
-        \item The DSL then gets executed into a second language of opcodes
-        \item Finally the DBMS compiles the opcodes into LLVM IR and then to native code
+        \item
+        A query plan is converted into an imperative plan expressed in a high-level imperative 
+        DSL called the \textit{MemSQL Programming Language} (MLP).
+        
+        \item
+        The DSL then gets executed into a second language of opcodes
+        
+        \item
+        Finally the DBMS compiles the opcodes into LLVM IR and then to native code.
     \end{itemize}
-    \item VitesseDB
+
+    \item \dbSys{VitesseDB}
     \begin{itemize}
-        \item Query accelerator for Postgres/Greenplum that uses LLVM + intra-query parallelism
-        \item JIT Predicates
+        \item
+        Query accelerator for Postgres/Greenplum that uses LLVM + intra-query parallelism.
     \end{itemize}
-    \item Apache Spark
+    
+    \item \dbSys{Apache Spark}~\cite{armbrust15}
     \begin{itemize}
-        \item Introduced in the new Tungsten engine in 2015
-        \item The system converts a query's WHERE clause expression trees into AST
-        \item It then compiles these ASTs to generate JVM bytecode, which is then executed natively
+        \item
+        Introduced in the new Tungsten engine in 2015 that included code generation.
+        
+        \item
+        The system converts a query's \texttt{WHERE} clause expression trees into an AST.
+        
+        \item
+        It then compiles these ASTs to generate JVM byte code that it executes natively.
     \end{itemize}
-    \item Peloton
+    
+    \item \dbSys{Peloton}~\cite{menon17}
     \begin{itemize}
-        \item Full compilation of the entire query plan
-        \item Relax the pipeline breakers of HyPEr to create mini-batches for operators that can be vectorized
-        \item Use software pre-fetching to hide memory stalls
+        \item
+        Full compilation of the entire query plan
+        
+        \item
+        Relax the pipeline breakers of HyPer to create mini-batches for operators that can be 
+        vectorized.
+        
+        \item
+        Use software pre-fetching to hide memory stalls.
     \end{itemize}
 \end{itemize}
 
-\section{Conclusion}
-\begin{itemize}
-    \item Query compilation makes a difference but is non-trivial to implement
-    \item The 2016 version of MemSQL is the best query compilation implementation out there
-\end{itemize}
+% \section{Conclusion}
+% \begin{itemize}
+%     \item Query compilation makes a difference but is non-trivial to implement
+%     \item The 2016 version of MemSQL is the best query compilation implementation out there
+% \end{itemize}
 
 % ==================================================================
 % BIBLIOGRAPHY
