@@ -110,8 +110,7 @@
     
     \item
     If disk I/O is no longer the slowest resource, much of the DBMS architecture will have to 
-    change account for other bottlenecks~\cite{stonebraker2007}.
-    
+    change to account for other bottlenecks:~\cite{stonebraker2007}
     \begin{itemize}
         \item Locking/latching
         \item Cache-line misses
@@ -120,49 +119,104 @@
         \item Data movement and copying
         \item Networking (between application and DBMS)
     \end{itemize}
-    \item \textbf{Data Organization}
+    
+    \item \textbf{Data Organization:}
     \begin{itemize}
-        \item In-Memory DBMS will organize tuples in blocks/pages
-        \item Direct memory pointers vs record ids
-        \item Fixed-length vs variable-length data pools
-        \item Use checksums to detect software errors from trashing the database
-        \item Why Not use mmap?
-        \begin{itemize}
-            \item Using mmap gives up fine-grained control on the contents of memory
-            \item Cannot perform non-blocking memory access
-        \end{itemize}
+        \item
+        In-memory DBMS will organize tuples in blocks/pages.
+        
+        \item
+        Direct memory pointers vs record ids.
+        
+        \item
+        Fixed-length vs variable-length data pools.
+        
+        \item
+        Use checksums to detect software errors from trashing the database.
+        
+%         \item Why Not use \texttt{mmap} in a DBMS?
+%         \begin{itemize}
+%             \item
+%             Using \textit{mmap} gives up fine-grained control on the contents of memory
+%             
+%             \item
+%             The system cannot perform non-blocking memory access.
+%         \end{itemize}
     \end{itemize}
-    \item \textbf{Concurrency Control}
+    
+    \item \textbf{Concurrency Control:}
     \begin{itemize}
-        \item Observation: The cost of a txn acquiring a lock is the same as accessing data
-        \item Fine-grained locking allows for better concurrency but requires more locks
-        \item Coarse-grained locking requires fewer locks but limits the amount of concurrency
-        \item The DBMS can store locking information about each tuple together with its data
-        \item New Bottleneck is contention caused from txns trying to access data at the same time
+        \item
+        Observation: The cost of a txn acquiring a lock is the same as accessing data.
+        
+        \item
+        Fine-grained locking allows for better concurrency but requires more locks.
+        
+        \item
+        Coarse-grained locking requires fewer locks but limits the amount of concurrency.
+        
+        \item
+        The DBMS can store locking information about each tuple together with its data.
+        
+        \item
+        The new bottleneck is contention caused from txns trying to access data at the 
+        same time.
     \end{itemize}
-    \item \textbf{Indexes}
+    
+    \item \textbf{Indexes:}
     \begin{itemize}
-        \item Indexes are usually rebuilt in an in-memory DBMS after restart to avoid logging overhead
-        \item Modern databases typically do not log index updates
+        \item
+        Indexes are usually rebuilt in an in-memory DBMS after restart to avoid logging overhead.
+        
+        \item
+        Modern databases typically do not log index updates.
     \end{itemize}
-    \item \textbf{Query Processing}
+    
+    \item \textbf{Query Processing:}
     \begin{itemize}
-        \item The best strategy for executing a query plan in a DBMS changes when all the data is already in memory
-        \item Sequential scans are no longer significantly faster than random access
-        \item The traditional tuple-at-a-time iterator model is too slow because of function calls
+        \item
+        The best strategy for executing a query plan in a DBMS changes when all the data is 
+        already in memory.
+        
+        \item
+        Sequential scans are no longer significantly faster than random access.
+        
+        \item
+        The traditional tuple-at-a-time iterator model is too slow because of function calls.
     \end{itemize}
-    \item \textbf{Logging and Recovery}
+    
+    \item \textbf{Logging and Recovery:}
     \begin{itemize}
-        \item The DBMS still needs WAL on non-volatile storage since the system could halt at anytime
-        \item May be possible to use more lightweight logging schemes (e.g. only store redo information)
-        \item Since there are no "dirty pages", we dont need to maintain LSNs throughout the systems
-        \item System also still takes checkpoints, however, there are different methods for checkpointing
+        \item
+        The DBMS still needs WAL on non-volatile storage since the system could halt at anytime.
+        
+        \item
+        May be possible to use more lightweight logging schemes (e.g., only store redo 
+        information).
+        
+        \item
+        Since there are no ``dirty pages'', we dont need to maintain LSNs throughout the systems.
+        
+        \item
+        System also still takes checkpoints, however, there are different methods for 
+        checkpointing.
     \end{itemize}
-    \item Non-Volatile memory: Emerging hardware that is similar to speed of DRAM with the persistence guarantees of an SSD
-    \item Notable In-memory DBMSs
+    
+    \item
+    \textbf{Non-Volatile Memory:}
+    Emerging hardware that is similar to speed of DRAM with the 
+    persistence guarantees of an SSD~\cite{arulraj15}.
+    
+    \item Notable Early In-memory DBMSs:
     \begin{itemize}
-        \item \dbSys{TimesTen}: Multi-process, shared memory DBMS from Oracle~\cite{lahiri13}
-        \item \dbSys{Dali}: Multi-process shared memory storage manager using memory mapped files~\cite{Dali}
+        \item
+        \dbSys{TimesTen}: Originally Smallbase~\cite{heytens95} from HP Labs.
+        Multi-process, shared memory DBMS.
+        Bought by Oracle in 2005~\cite{lahiri13}.
+        
+        \item
+        \dbSys{Dali}: Multi-process shared memory storage manager using memory mapped 
+        files~\cite{Dali}.
     \end{itemize}
 \end{itemize}
 
