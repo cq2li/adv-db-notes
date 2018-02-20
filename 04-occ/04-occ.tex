@@ -1,0 +1,146 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{4}
+\newcommand{\lecturename}{Optimistic Concurrency Control}
+\newcommand{\lecturedata}{2018-01-29}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+\section{Stored Procedures}
+\begin{itemize}
+    \item Disk stalls are (almost) gone when execuing txns in an in-memory DBMS
+    \item There are still other stalls when an app uses \textbf{conversational} API to execute queries on DBMS
+    \item Solutions
+    \begin{itemize}
+        \item Prepared Statements: Removes query preparaatiion overhead
+        \item Query Batches: Reduces the number of network roundtrips
+        \item Stored Procedures: Removes both preparation and network stalls
+    \end{itemize}
+    \item \textbf{Stored Procedures}: A group of queries that form a logical unit and perform a particular task on behalf of an application directly inside of the DBMS
+    \item Advantages
+    \begin{itemize}
+        \item Reduce the number of round trips between application and database servers
+        \item Increased performance because queries are pre-compiled and stored in DBMS
+        \item Procedure reuse across applications
+        \item Sever-side txn restarts on conflicts
+    \end{itemize}
+    \item Disadvantages
+    \begin{itemize}
+        \item Not as many developers know how to write SQL/PSM code
+        \item Outside the scope of the application so it is difficult to manage versions and hard to debug
+        \item Probably not to be portable to other DBMSs
+        \item DBAs usually don't give permissions out freely
+    \end{itemize}
+\end{itemize}
+
+\section{Concurrency Control}
+\begin{itemize}
+    \item The protocol to allow txns to access a database in a multi-programmed fashion while preserving the illusion that each of them is executing alone on a dedicated system
+    \item The goal is to have the effect of a group of txns on the database's state is equivalent to any serial execution of all txns
+    \item Concurrency Control Schemes
+    \begin{enumerate}
+        \item Two-Phase Locking (Pessimistic) ...
+        \item Timestamp Ordering (Optimistic) ...
+    \end{enumerate}
+    \item Two-Phase Locking
+    \begin{itemize}
+        \item Deadlock Detection: If deadlock is found, use a heuristic to decide what txn to kill in order to break deadlock
+        \item Deadlock Prevention: If lock is not available, then make a decision about how to proceed
+    \end{itemize}
+\end{itemize}
+
+\section{Timestamp Ordering and OCC}
+\begin{itemize}
+    \item Basic T/O
+    \begin{itemize}
+        \item Check for conflicts on each read/write
+        \item Copy tuples on each access to ensure repeatable reads
+    \end{itemize}
+    \item Optimistic Concurrency Control (OCC)
+    \begin{itemize}
+        \item Store all changes in private workspace
+        \item Check for conflicts at commit time and then merge
+        \item First proposed in 1981 at CMU by H. T. Kung ~\cite{p213-kung}
+        \item Read Phase: ...
+        \item Validation Phase: ...
+        \begin{itemize}
+            \item Backward Validation: Check whether the committing txn intersects its read/write sets with those of any txns that have \textbf{already} committed
+            \item Forward Validation: Check whether the commiting txn intersects its read/write sets with any active txns that have \textbf{not} yet committed
+            \item Original OCC uses serial Validation
+            \item Parallel validation means that each txn must check the read/write set of other txns that are trying to validate at the same time. Each txn has to acquire locks for its write set records in some global order
+
+        \end{itemize}
+        \item Write Phase
+        \begin{itemize}
+            \item The DBMS Propogates the changes in the txns write set to the database and makes them visible to other tnxs
+            items
+            \item ...
+        \end{itemize}
+        \item Timestamp Allocation~\cite{p209-yu}
+        \begin{itemize}
+            \item Mutex: Worst option. Mutexes are the "Hitler of Concurrency"
+            \item Atomic Addition: Requires cache invalidation on write
+            \item Batched atomic addition: Needs a back-off mechanism to prevent fast burn
+            \item Hardware Clock: Not sure if it will exist in future CPU's
+            \item Hardware Counter: Not implemented in existing CPU's
+        \end{itemize}
+    \end{itemize}
+\end{itemize}
+
+\section{Silo OCC}
+\begin{itemize}
+    \item \dbSys{Silo} DBMS ~\cite{tu-sosp2013}
+    \begin{itemize}
+        \item Single-node in-memory OLTP DBMSs
+        \item Serializable OCC with parallel backward Validation
+        \item Stored procedure only API
+        \item No writes to shared-memory for read txns
+        \item Batched timestamp allocation using epochs
+    \end{itemize}
+    \item Epochs
+    \begin{itemize}
+        \item Time is sliced into fixed-length epochs (40ms)
+        \item All txns that start within the same epoch will be committed together at the end of the epoch
+        \item Txns that span an epoch have to refresh themselves to be carried over into the next epoch
+        \item Worker threads only need to synchronize at the beginning and end of each epoch
+    \end{itemize}
+    \item Transaction IDs
+    \begin{itemize}
+        \item Each worker thread generates a unique txn id based on the current epoch number and the next value in its assigned batch
+    \end{itemize}
+    \item Garbage Collection
+    \begin{itemize}
+        \item Cooperative threads GC
+        \item Each worker thread marks a deleted object with a \textbf{reclamation epoch}
+    \end{itemize}
+    \item Range queries
+    \begin{itemize}
+        \item DBMSs handles phantoms by tracking the txns scan set on indexes
+        \item Re-execute scans in the validation phase to see whether the index has changed
+        \item Have to include virtual entries for keys that do not exist in the index
+    \end{itemize}
+\end{itemize}
+
+\section{Parting Thoughts}
+\begin{itemize}
+    \item Trade-off between aborting txns early or later
+    \begin{itemize}
+        \item Early: Avoid wasted work for txns that will eventually abort, but has checking overhead
+        \item Later: No runtime overhead but lots of wasted work under high contention
+    \end{itemize}
+    \item Silo is a very influential system
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{04-occ}
+
+\end{document}
