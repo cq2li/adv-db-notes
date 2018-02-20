@@ -1,6 +1,6 @@
 \documentclass[11pt]{article}
 
-\newcommand{\lecturenumber}{2}
+\newcommand{\lecturenumber}{02}
 \newcommand{\lecturename}{In-Memory Database Management Systems}
 \newcommand{\lecturedata}{2018-01-22}
 
@@ -13,67 +13,103 @@
 
 \section{Background}
 \begin{itemize}
-    \item Much of the history of DBMSs is about dealing with the limitations of hardware
-    \item Up until the late 2000s, pretty much all systems were disk based systems
-    \item In the 1970s when the first DBMSs came out were:
+    \item
+    Much of the history of DBMSs is about dealing with the limitations of hardware.
+    
+%     \item
+%     Up until the late 2000s, most systems were disk-based systems.
+    
+    \item
+    The first DBMSs in the 1970s were:
     \begin{itemize}
         \item Uniprocessor (single core CPU)
         \item RAM was severely limited
         \item Database had to be stored on disk
         \item Disk is slow. \textbf{Seriously slow}
     \end{itemize}
-    \item Now DRAM capacities are large enough that most databases fit in memory
-    \begin{itemize}
-        \item Structured data sets are smaller
-        \item Unstructured or semi-structured data sets are much larger
-        \item Class will focus on structured databases
-    \end{itemize}
+    
+    \item
+    Now DRAM capacities are large enough that most structured databases will entirely fit in memory.
+    Unstructured or semi-structured data sets are much larger (think log files stored on HDFS).
 
 \end{itemize}
 
-\section{Disk Oriented DBMS}
+\section{Disk-Oriented Database Management Systems}
 \begin{itemize}
-    \item For a disk oriented DBMS, the system architecture is predicated on the assumption that data is stored in non-volatile memory
-    \item The database is organzied as a set of fixed-length blocks called \textbf{slotted pages}
-    \item The system uses an in-memory (volatile) buffer pool to cache the blocks cached from disk
-    \item \textbf{Buffer pool}
+    \item
+    For a disk oriented DBMS, the system architecture is predicated on the assumption that data 
+    is stored in non-volatile memory.
+    The database is organized as a set of fixed-length blocks called \textbf{slotted pages}.
+    The system uses an in-memory (volatile) buffer pool to cache the blocks cached from disk.
+    
+    \item \textbf{Buffer Pool:}
     \begin{itemize}
-        \item When a query accesses a page, the DBMS checks to see if that page is already in memory
-        \item If not, the DBMS retreaves the memory from disk and copies it into a frame in its buffer pool
-        \item Once the page is in memory, the DBMS translates any on-disk adresses to their in-memory addresses
-        \item Every tuple access has to go through the buffer pool manager regardless of whether that data will always be in memory
+        \item
+        When a query accesses a page, the DBMS checks to see if that page is already in memory.
+        
+        \item
+        If not, the DBMS retrieves the memory from disk and copies it into a frame in its 
+        buffer pool.
+        
+        \item
+        Once the page is in memory, the DBMS translates any on-disk addresses to their 
+        in-memory addresses.
+        
+        \item
+        Every tuple access has to go through the buffer pool manager regardless of whether 
+        that data will always be in memory.
     \end{itemize}
-    \item \textbf{Concurrency Control}
+    
+    \item \textbf{Concurrency Control:}
     \begin{itemize}
-        \item In a disk oriented DBMS, the system assumes that a txn could stall at any time when it tries to access data that is not in memory
-        \item Concurrency allows the DBMS to execute other txns at the same time to improve performance
-        \item Locks are stored in separate data structure to avoid being swapped to disk
-        \item Lock~\cite{a16-graefe}
-        \begin{itemize}
-            \item Protects the database logical contents from other txns
-            \item Held for txn duration
-            \item Need to be able to rollback changes
-        \end{itemize}
-        \item Latch~\cite{a16-graefe}
-        \begin{itemize}
-            \item Protects the critical sections of the DBMS internal data structure from other threads
-            \item Held for operation duration
-            \item Does not need to be able to rollback changes
-        \end{itemize}
+        \item
+        In a disk oriented DBMS, the system assumes that a transaction could stall at any time when 
+        it tries to access data that is not in memory.
+        
+        \item
+        The system's concurrency control protocol allows the DBMS to execute other transactions at 
+        the same time to improve performance while still preserving atomicity and isolation 
+        guarantees.
+        
+%         \item Locks are stored in separate data structure to avoid being swapped to disk
+%         \item Lock~\cite{a16-graefe}
+%         \begin{itemize}
+%             \item Protects the database logical contents from other txns
+%             \item Held for txn duration
+%             \item Need to be able to rollback changes
+%         \end{itemize}
+%         \item Latch~\cite{a16-graefe}
+%         \begin{itemize}
+%             \item Protects the critical sections of the DBMS internal data structure from other threads
+%             \item Held for operation duration
+%             \item Does not need to be able to rollback changes
+%         \end{itemize}
     \end{itemize}
-    \item \textbf{Logging and Recovery}
+    
+    \item \textbf{Logging and Recovery:}
     \begin{itemize}
-        \item Most DBMS use Steal + No-Force buffer pool policies so all modifications have to be flushed to the WAL before a txn can commit
-        \item Log entries contain before and after image of record modified
+        \item
+        Most DBMS use \texttt{STEAL} + \texttt{NO-FORCE} buffer pool policies so all modifications 
+        have to be flushed to the WAL before a transaction can commit~\cite{franklin14}.
+        
+        \item
+        Log entries contain before and after image of record modified.
     \end{itemize}
 
+    \item
+    In a disk-based system, only approximately 7\% of instructions are done on actual 
+    work~\cite{harizopoulos08}.
+    
 \end{itemize}
 
-\section{In-Memory DBMS}
+\section{In-Memory Database Management Systems}
 \begin{itemize}
-    \item In a disk-based system, only approximately 7\% of instructions are done on actual work~\cite{looking-glass}
-    \item The system architecture assumes that the primary storage location of the database is \textbf{permanently} in memory
-    \item If I/O is no longer the slowest resource, much of the DBMS architecture will have to change account for other bottlenecks~\cite{non-volatile}
+    \item
+    The system architecture assumes that the primary storage location of the database is in 
+    memory. This means that the DBMS does not need to perform extra steps during execution to 
+    handle the case where it has to retrieve data from disk.
+    If disk I/O is no longer the slowest resource, much of the DBMS architecture will have to 
+    change to account for other bottlenecks:~\cite{stonebraker2007}
     \begin{itemize}
         \item Locking/latching
         \item Cache-line misses
@@ -82,49 +118,107 @@
         \item Data movement and copying
         \item Networking (between application and DBMS)
     \end{itemize}
-    \item \textbf{Data Organization}
+    
+    \item \textbf{Data Organization:}
     \begin{itemize}
-        \item In-Memory DBMS will organize tuples in blocks/pages
-        \item Direct memory pointers vs record ids
-        \item Fixed-length vs variable-length data pools
-        \item Use checksums to detect software errors from trashing the database
-        \item Why Not use mmap?
-        \begin{itemize}
-            \item Using mmap gives up fine-grained control on the contents of memory
-            \item Cannot perform non-blocking memory access
-        \end{itemize}
+        \item
+        In-memory DBMS will organize tuples in blocks/pages.
+        
+        \item
+        Direct memory pointers vs record ids.
+        
+        \item
+        Fixed-length vs variable-length data pools.
+        
+        \item
+        Use checksums to detect software errors from trashing the database.
+        
+%         \item Why Not use \texttt{mmap} in a DBMS?
+%         \begin{itemize}
+%             \item
+%             Using \textit{mmap} gives up fine-grained control on the contents of memory
+%             
+%             \item
+%             The system cannot perform non-blocking memory access.
+%         \end{itemize}
     \end{itemize}
-    \item \textbf{Concurrency Control}
+    
+    \item \textbf{Concurrency Control:}
     \begin{itemize}
-        \item Observation: The cost of a txn acquiring a lock is the same as accessing data
-        \item Fine-grained locking allows for better concurrency but requires more locks
-        \item Coarse-grained locking requires fewer locks but limits the amount of concurrency
-        \item The DBMS can store locking information about each tuple together with its data
-        \item New Bottleneck is contention caused from txns trying to access data at the same time
+%         \item
+%         Observation: The cost of a txn acquiring a lock is the same as accessing data.
+        
+        \item
+        Fine-grained locking allows for better concurrency but requires more locks.
+        
+        \item
+        Coarse-grained locking requires fewer locks but limits the amount of concurrency.
+        
+        \item
+        The DBMS can store locking information about each tuple together with its data.
+        
+        \item
+        The new bottleneck is contention caused from transactions trying to access data at the 
+        same time.
     \end{itemize}
-    \item \textbf{Indexes}
+    
+    \item \textbf{Indexes:}
     \begin{itemize}
-        \item Indexes are usually rebuilt in an in-memory DBMS after restart to avoid logging overhead
-        \item Modern databases typically do not log index updates
+        \item
+        Indexes are usually rebuilt in an in-memory DBMS after restart to avoid logging overhead.
+        
+        \item
+        Modern databases typically do not log index updates.
     \end{itemize}
-    \item \textbf{Query Processing}
+    
+    \item \textbf{Query Processing:}
     \begin{itemize}
-        \item The best strategy for executing a query plan in a DBMS changes when all the data is already in memory
-        \item Sequential scans are no longer significantly faster than random access
-        \item The traditional tuple-at-a-time iterator model is too slow because of function calls
+        \item
+        The best strategy for executing a query plan in a DBMS changes when all the data is 
+        already in memory.
+        Sequential scans are no longer significantly faster than random access.
+        
+        \item
+        The traditional tuple-at-a-time iterator model is too slow because of function calls.
     \end{itemize}
-    \item \textbf{Logging and Recovery}
+    
+    \item \textbf{Logging and Recovery:}
     \begin{itemize}
-        \item The DBMS still needs WAL on non-volatile storage since the system could halt at anytime
-        \item May be possible to use more lightweight logging schemes (e.g. only store redo information)
-        \item Since there are no "dirty pages", we dont need to maintain LSNs throughout the systems
-        \item System also still takes checkpoints, however, there are different methods for checkpointing
+        \item
+        The DBMS still needs WAL on non-volatile storage since the system could halt at anytime.
+        
+        \item
+        May be possible to use more lightweight logging schemes (e.g., only store redo 
+        information).
+        
+        \item
+        Since there are no ``dirty pages'', we do not need to maintain LSNs throughout the systems.
+        
+        \item
+        System also still takes checkpoints, however, there are different methods for 
+        checkpointing.
     \end{itemize}
-    \item Non-Volatile memory: Emerging hardware that is similar to speed of DRAM with the persistence guarantees of an SSD
-    \item Notable In-memory DBMSs
+    
+    \item
+    \textbf{Non-Volatile Memory:}
+    Emerging hardware that is similar to speed of DRAM with the 
+    persistence guarantees of an SSD~\cite{arulraj15}.
+    
+    \item Notable Early In-memory DBMSs:
     \begin{itemize}
-        \item \dbSys{TimesTen}: Multi-process, shared memory DBMS from Oracle~\cite{TimesTen}
-        \item \dbSys{Dali}: Multi-process shared memory storage manager using memory mapped files~\cite{Dali}
+        \item
+        \dbSys{TimesTen}: Originally Smallbase~\cite{heytens95} from HP Labs.
+        Multi-process, shared memory DBMS.
+        Bought by Oracle in 2005~\cite{lahiri13}.
+        
+        \item
+        \dbSys{Dali}: Multi-process shared memory storage manager using memory mapped 
+        files~\cite{Dali}.
+        
+        \item
+        \dbSys{P*TIME}: Korean in-memory DBMS from the 2000s~\cite{cha04}. Lots of interesting 
+        features (e.g., hybrid storage layouts, support for larger-than-memory databases). 
+        Sold to SAP in 2005 and is now part of HANA.
     \end{itemize}
 \end{itemize}
 

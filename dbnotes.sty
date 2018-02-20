@@ -80,9 +80,9 @@
 \setlength{\parskip}{5pt plus 1pt}
 
 % Itemize
-\let\tempone\itemize
-\let\temptwo\enditemize
-\renewenvironment{itemize}{\tempone\addtolength{\itemsep}{0.15\baselineskip}}{\temptwo}
+% \let\tempone\itemize
+% \let\temptwo\enditemize
+% \renewenvironment{itemize}{\tempone\addtolength{\itemsep}{0.15\baselineskip}}{\temptwo}
 
 % Enumerate
 % \let\tempone\enumerate
@@ -90,6 +90,7 @@
 % \renewenvironment{enumerate}{\tempone\addtolength{\itemsep}{0.15\baselineskip}}{\temptwo}
 
 \setlist[itemize]{noitemsep, topsep=0pt}
+\setlist[enumerate]{noitemsep, topsep=0pt}
 
 % This moves the title up vertically on the first page
 \setlength{\droptitle}{-0.8in}
