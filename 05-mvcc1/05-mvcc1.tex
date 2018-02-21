@@ -1,0 +1,209 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{5}
+\newcommand{\lecturename}{Multi-Version Concurrency Control (MVCC) - Part 1}
+\newcommand{\lecturedata}{2018-01-31}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+\section{Compare and Swap}
+\begin{itemize}
+    \item Atomic instruction that compares contents of a memory location $M$ to a given value $V$
+    \item If the values are equal, installs new given value $V'$ in $M$
+    \item Otherwise operation fails
+    \item Can be done with an \textbf{intrinsic} function call, a function that a compiler knows to convert to an instruction without having to write the machine code
+\end{itemize}
+
+\section{Isolation Levels}
+\begin{itemize}
+    \item Serializability is useful because it allows programmers to ignore concurrency issues but enforcing it may allow too little parallelism and limit performance
+    \item We may want to use a weaker level of consistency to improve scalability
+    \item Isolation levels control the extent that a txn is exposed to the actions of other concurrent txns
+    \item Anomalies
+    \begin{itemize}
+        \item Dirty Read: Reading uncommitted data
+        \item Unrepeatable Reads Anomaly: Redoing a read results in a different result
+        \item Phantom Reads Anomaly: Insertion or Deletions result in different results for the same queries
+    \end{itemize}
+    \item Anti-Isolation levels (strongest to weakest)
+    \begin{enumerate}
+        \item \isoLevel{Serializable}: No Phantoms, all reads repeatable, and no dirty reads
+        \item \isoLevel{Repeatable Reads}: Phantoms may happen
+        \item \isoLevel{Read-Committed}: Phantoms and unrepeatable reads may happen
+        \item \isoLevel{Read-Uncommitted}: All anomalies may happen
+    \end{enumerate}
+    \item The isolation levels defined as part of SQL-92 standard only focused on anomaies that can occur in a 2PL-based DBMS~\cite{p1-berenson}
+    \item There are two additional isolation levels
+    \begin{enumerate}
+        \item \isoLevel{Cursor Stability} (\dbSys{DB2} default)
+        \begin{itemize}
+            \item Between repeatable reads and read committed
+            \item Prevents Lost Update Anomaly
+        \end{itemize}
+        \item \isoLevel{Snapshot Isolation}
+        \begin{itemize}
+            \item Guarantees that all reads made in a txn see a consistent snapshot of the database that existed at the time the txn started
+            \item A txn will commit only if its writes do not conflict with any concurrent updates made since that snapshot
+            \item Susceptible to Write Skew Anomaly
+        \end{itemize}
+    \end{enumerate}
+\end{itemize}
+
+\section{MVCC}
+\begin{itemize}
+    \item The DBMS maintains multiple \textbf{physical} versions of an object of a single \textbf{logical} object in the database
+    \item When a txn writes to an object, the DBMS, creates a new version of that object
+    \item When a txn reads an object, it reads the newest version that existed when a txn started
+    \item \textbf{Main Benefits}
+    \begin{itemize}
+        \item Writes don't block readers
+        \item Read-only txns can read a consistent snapshot without acquiring locks
+        \item Easily support time-travel queries
+    \end{itemize}
+    \item \textbf{MVCC is more than just a "concurrency control protocol". It completely affects how the DBMS manages transactions and the database}
+    \item Design Decisions~\cite{p781-wu}
+    \begin{itemize}
+        \item Concurrency Control protocol
+        \item Version Storage
+        \item Garbage Collection
+        \item Index Management
+        \item Txn Id Wraparound (New)
+    \end{itemize}
+    \item Tuple Header Format
+    \begin{itemize}
+        \item Txn-ID: Unique Txn Identifier
+        \item Begin/End Timestamp: Version lifetime
+        \item Pointer: Points to next or previous tuple in version chain
+        \item Additional Meta-Data
+    \end{itemize}
+\end{itemize}
+
+\section{MVCC - Concurrency Control Protocol}
+\begin{itemize}
+    \item Approaches
+    \begin{enumerate}
+        \item Timestamp Ordering
+        \item OCC
+        \item Two-Phase Locking
+    \end{enumerate}
+    \item TimeStamp Ordering
+    \begin{itemize}
+        \item Use a "read-ts" field in the header to keep track of the timestamp of the last txn that read it
+        \item Txn is allowed to read version if the lock is unset and its $T_id$ is between "begin-ts" and "end-ts"
+        \item For writes, txn creates a new version if no other txn holds lock and $T_id$ is greater than "read-ts"
+    \end{itemize}
+\end{itemize}
+
+\section{MVCC - Version Storage}
+\begin{itemize}
+    \item The DBMS uses the tuple's pointer field to create a latch-free \textbf{version chain} per logical Tuple
+    \item This allows the DBMS to find the verson that is visible to a particular txn at runtime
+    \item Indexes always point to "head" of the chain
+    \item Thread store versions in "local" memory regions to avoid contention on centralized data structures
+    \item Different storage schemes determine where/what to store for each version
+    \item Approaches
+    \begin{enumerate}
+        \item Append-Only Storage
+        \begin{itemize}
+            \item All of the physical versions of a logical tuple are stored in the same table space (table heap)
+            \item On update, append new tuple to same table heap in an empty slot
+            \item Oldest-To-newest: Append new version to end of chain, traverse entire chain on lookup
+            \item Newest-to-Oldest: Have to update index pointers for every new version, but don't have to traverse chain on look ups
+        \end{itemize}
+        \item Time-Travel Storage
+        \begin{itemize}
+            \item On every update, copy current version to the time-travel table, and update pointer
+            \item Overwrite master version in main table, and update pointer
+        \end{itemize}
+        \item Delta Storage
+        \begin{itemize}
+            \item On every update, copy only the vaues that were modified into the delta storage and overwrite the master version
+            \item Txn can recreate old versions by applying the delta in reverse order
+        \end{itemize}
+    \end{enumerate}
+    \item Non-Inline Attributes
+    \begin{itemize}
+        \item Reuse pointers to variable-length pool for values that do not change between versions
+        \item Requires reference counters to know when it is safe to free memory, Unable to relocate memory easily
+    \end{itemize}
+\end{itemize}
+
+\section{MVCC - Garbage Collection}
+\begin{itemize}
+    \item The DBMS needs to remove \textbf{reclaimable} physical versions from the database over time
+    \item No active txn in the DBMS can see that version (SI)
+    \item The version was created by an aborted txn
+    \item Approaches
+    \begin{enumerate}
+        \item Tuple Level
+        \begin{itemize}
+            \item Find old versions by examining tuples directly
+            \item Background Vacuuming: Separate threads periodically scan the table and look for reclaimable versions. Works with any version storage technique
+            \item Cooperative Cleaning: Worker threads identify reclaimable versions as they traverse version change. Only works with O2N
+        \end{itemize}
+        \item Transaction Level
+        \begin{itemize}
+            \item Transactions keep track of their old version so the DBMS does not hav to scan tuples to determine visibility
+            \item The DBMS determines when all versions created by a finishing txn are no longer visible
+            \item May still maintain multiple threads to reclaim the memory fast enough for the workload
+        \end{itemize}
+    \end{enumerate}
+\end{itemize}
+
+\section{Index Management}
+\begin{itemize}
+    \item Primary key indexes always point to the version chain head
+    \item How often the DBMS updates index depends on whether system creates new versions when a tuple is updated
+    \item If a txn updates a primary key attribute(s), then this is treated as a DELETE followed by an INSERT
+    \item Secondary Indexes
+    \begin{itemize}
+        \item Approach 1: Logical Pointer
+        \begin{itemize}
+            \item Use a fixed identifier per tuple that \textbf{does not change}
+            \item Requires an extra indirection layer
+            \item Secondary indexes can store Primary Key or Tuple ID
+        \end{itemize}
+        \item Approach 2: Physical Address
+        \begin{itemize}
+            \item Pointer physicall points to tuple
+        \end{itemize}
+    \end{itemize}
+\end{itemize}
+
+
+\section{MVCC - $T_{id}$ Wraparound}
+\begin{itemize}
+    \item If the DBMS reaches the max value for its timestamps, it will have to wrap around and start at zero. This will make all previous versions be in the "future" from new transactions
+    \item Posgress Txn-ID Wraparound
+    \begin{itemize}
+        \item Stop accepting new commands when the system gets close to the max txn id
+        \item Set a flag in each tuple header that says that it is "frozen" in the past. Any new txn id will always be newer than a frozen version
+        \item Runs the vacuum before the system gets close to this upper limit
+    \end{itemize}
+\end{itemize}
+
+\section{Conclusion}
+\begin{itemize}
+    \item MVCC is currently the best approach for supporting txns in mixed workloads
+    \item Design decsions may be different for HTAP
+    \item Intersting MVCC research/project topics include
+    \begin{itemize}
+        \item Block compaction
+        \item Version Compression
+        \item On-line schema changes
+    \end{itemize}
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{05-mvcc1}
+
+\end{document}
