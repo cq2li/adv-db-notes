@@ -44,8 +44,9 @@
     \item The goal is to have the effect of a group of txns on the database's state is equivalent to any serial execution of all txns
     \item Concurrency Control Schemes
     \begin{enumerate}
-        \item Two-Phase Locking (Pessimistic) ...
-        \item Timestamp Ordering (Optimistic) ...
+        \item Two-Phase Locking (Pessimistic): Assume txns will conflict so they must acquire locks on database objects before they are allowed to access them
+        \item Timestamp Ordering (Optimistic): Assume that conflicts are rare so txns do not need to first acquire locks on database objects and instead check for
+conflicts at commit time.
     \end{enumerate}
     \item Two-Phase Locking
     \begin{itemize}
@@ -66,8 +67,8 @@
         \item Store all changes in private workspace
         \item Check for conflicts at commit time and then merge
         \item First proposed in 1981 at CMU by H. T. Kung ~\cite{p213-kung}
-        \item Read Phase: ...
-        \item Validation Phase: ...
+        \item Read Phase: Transaction's copy tuples accessed to private work space to ensure repeatable reads, and keep track of read/write sets
+        \item Validation Phase: When the txn invokes \sql{COMMIT}, the DBMS checks if it conflicts with other transactions
         \begin{itemize}
             \item Backward Validation: Check whether the committing txn intersects its read/write sets with those of any txns that have \textbf{already} committed
             \item Forward Validation: Check whether the commiting txn intersects its read/write sets with any active txns that have \textbf{not} yet committed
@@ -79,7 +80,7 @@
         \begin{itemize}
             \item The DBMS Propogates the changes in the txns write set to the database and makes them visible to other tnxs
             items
-            \item ...
+            \item As each record is updated, the txn releases the lock acquired during the Validation Phase
         \end{itemize}
         \item Timestamp Allocation~\cite{p209-yu}
         \begin{itemize}
@@ -124,16 +125,6 @@
         \item Re-execute scans in the validation phase to see whether the index has changed
         \item Have to include virtual entries for keys that do not exist in the index
     \end{itemize}
-\end{itemize}
-
-\section{Parting Thoughts}
-\begin{itemize}
-    \item Trade-off between aborting txns early or later
-    \begin{itemize}
-        \item Early: Avoid wasted work for txns that will eventually abort, but has checking overhead
-        \item Later: No runtime overhead but lots of wasted work under high contention
-    \end{itemize}
-    \item Silo is a very influential system
 \end{itemize}
 
 % ==================================================================
