@@ -77,8 +77,8 @@ Disadvantages of Stored Procedures:
 %% Concurrency Control
 %% ==================================================================
 \section{Concurrency Control}
-The protocol to allow txns to access a database in a multi-programmed fashion while preserving 
-the illusion that each of them is executing alone on a dedicated system.
+A DBMS' concurrency control protocol to allow txns to access a database in a multi-programmed 
+fashion while preserving the illusion that each of them is executing alone on a dedicated system.
 The goal is to have the effect of a group of txns on the database's state is equivalent to any 
 serial execution of all txns.
     
@@ -107,13 +107,24 @@ Concurrency Control Schemes
 %% ==================================================================
 %% TIMESTAMP ORDERING AND OCC
 %% ==================================================================
-% \section{Timestamp Ordering and OCC}
-% \begin{itemize}
-%     \item Basic T/O
-%     \begin{itemize}
-%         \item Check for conflicts on each read/write
-%         \item Copy tuples on each access to ensure repeatable reads
-%     \end{itemize}
+\section{Timestamp Ordering Concurrency Control}
+\textbf{Basic T/O Protocol:}
+\begin{itemize}
+    \item
+    Every transaction is assigned a unique timestamp when they arrive in the system.
+    
+    \item
+    The DBMS maintains separate timestamps in each tuple's header of the last transaction that read 
+    that tuple or wrote to it.
+    
+    \item
+    Each transaction check for conflicts on each read/write by comparing their timestamp with the 
+    timestamp of the tuple they are accessing.
+    
+    \item
+    The DBMS needs copy a tuple into the transaction's private workspace when reading a tuple to 
+    ensure repeatable reads.
+\end{itemize}
 %     \item Optimistic Concurrency Control (OCC)
 %     \begin{itemize}
 %         \item Store all changes in private workspace
