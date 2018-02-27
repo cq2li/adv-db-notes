@@ -1,0 +1,164 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{9}
+\newcommand{\lecturename}{OLTP Indexes - Part 2}
+\newcommand{\lecturedata}{2018-02-14}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+\section{Index Implementation Issues}
+    \subsection*{Memory Pools}
+        \begin{itemize}
+            \item We don't want to be calling \textbf{malloc} and \textbf{free} anytime we need to add or delete a node
+            \item If all the nodes are the same size, then the index can maintain a pool of available nodes
+            \item \textbf{Insert}: Grab a free node, otherwise create a new one
+            \item \textbf{Delete}: Add the node back to the free pool
+            \item Need some policy to decide when to retract the pool size
+        \end{itemize}
+
+
+    \subsection*{Garbage Collection}
+        \begin{itemize}
+            \item We need to know when it is safe to reclaim memory for deleted nodes in a latch-free index
+            \item Reference counting
+            \begin{itemize}
+                \item Maintain a counter for each node to keep track of the number of threads that are accessing it
+                \begin{itemize}
+                    \item Increment the counter before accessing
+                    \item Decrement it when finished
+                    \item A node is only safe to delete when the count is zero
+                \end{itemize}
+                \item This has bad performance for multi-core CPUs, as chainging the counters causes a lot of cache coherence traffic
+        \end{itemize}
+
+            \subsection*{Epoch Garbage Collection}
+            \begin{itemize}
+                \item Maintain a global epoch counter that is periodaically updated (e.g. every 10ms)
+                \item Keep track of what threads enter the index during an epoch and when they leave
+                \item Mark the current epoch of a node when it is marked for deletion
+                \item The node can be reclaimed once all threads have left that epoch (\textbf{and all preceding epochs})
+                \item Also known as Read-Copy-Update (RCU) in Linux
+            \end{itemize}
+            \end{itemize}
+
+    \subsection*{Non-Unique Indexes~\cite{p203-graefe}}
+        \begin{itemize}
+            \item Approach 1: Duplicate Keys
+            \begin{itemize}
+                \item Use the same node layout but store duplicate keys
+            \end{itemize}
+            \item Approach 2: Value Lists
+            \begin{itemize}
+                \item Store each key only once and maintain a linked list of unique values
+            \end{itemize}
+        \end{itemize}
+
+    \subsection*{Variable Length Keys}
+        \begin{itemize}
+            \item Approach 1: Pointers
+            \begin{itemize}
+                \item Store the keys as pointers to the tuples attributes
+            \end{itemize}
+            \item Approach 2: Variable Length Nodes
+            \begin{itemize}
+                \item The size of each node in the index can vary
+                \item Requires careful memory management
+            \end{itemize}
+            \item Approach 3: Padding
+            \begin{itemize}
+                \item Always pad the key to the max length of the key type
+            \end{itemize}
+            \item Approach 4: Key Map / Indirection
+            \begin{itemize}
+                \item Embed an array of pointer that map to the key + value list within the node
+            \end{itemize}
+        \end{itemize}
+
+    \subsection*{Prefix Compression}
+        \begin{itemize}
+            \item Store a minimum prefix that is needed to correctly route probes into the index
+            \item Since keys are sorted in lexicographical order, there will be a lot duplicated prefixes
+        \end{itemize}
+
+
+
+\section{Adaptive Radix Tree (ART)~\cite{leis-icde2013}}
+    \begin{itemize}
+        \item Uses digital representation of keys to examine prefixes 1-by-1 instead of comparing entire keys
+        \item Tree structure is deterministic
+    \end{itemize}
+
+\subsection*{Radix tree properties}
+    \begin{itemize}
+        \item The height of the tree depends on the length of the keys
+        \item Does not require rebalancing
+        \item The path to a leaf node represents the key of the leaf
+        \item Keys are stored implicitly and can be reconstructed from path
+    \end{itemize}
+\subsection*{Adaptively Sized Nodes}
+    \begin{itemize}
+        \item The index supports four different internal node types with different capacities
+        \item Pack in multiple digits into a single node to improve cache locality
+    \end{itemize}
+\subsection*{Binary Comparable Keys}
+    \begin{itemize}
+        \item Not all attribute types can be decomposed into binary comparable digits for a radix tree
+        \item Unsigned Integers: Byte order must be flipped for little endian machines
+        \item Signed Integers: Flip two's complement so that negative numbers are smaller than positive
+        \item Floats: Classify into group (neg vs. pos, normalized vs denormalized), then store as unsigned integer
+        \item Compound: Transform each attribute separately
+    \end{itemize}
+
+    \section{Concurrent ART Index~\cite{leis-damon2016}}
+    \begin{itemize}
+        \item HyPer's ART is \textbf{not} latch free
+    \end{itemize}
+
+    \subsection*{Approach #1: Optimistic Lock Coupling}
+        \begin{itemize}
+            \item Optimistic crabbing scheme where writers are not blocked on readers
+            \item Writers increment counter when they acquire latch
+            \item Readers can proceed if a node's latch is available
+            \item It then checks whether the latch's counter has changed from when it checked the latch
+        \end{itemize}
+    \subsection*{Approach #2: Read-Optimized Write Exclusion (ROWEX)}
+        \begin{itemize}
+            \item Each node includes an exclusive lock that blocks only other writers and not readers
+            \item Readers proceed without checking versions or locks
+            \item Every writer must ensure that reads are always consistent
+            \item \textbf{Requires fundamental changes to how threads make modifications to index to make the scheme work}
+        \end{itemize}
+
+\section{Parting Thoughts}
+\begin{itemize}
+    \item Andy was wrong about the Bw-Tree and latch-free indexes
+\end{itemize}
+
+
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{09-oltpindexes2}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\end{document}
