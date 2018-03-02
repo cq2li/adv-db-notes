@@ -1,0 +1,188 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{13}
+\newcommand{\lecturename}{Checkpoint Protocols}
+\newcommand{\lecturedata}{2018-02-28}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+\section{In-Memory Checkpoints and Considerations}
+\begin{itemize}
+    \item There are different approaches for how the DBMS can create a new checkpoint for an in-memory database
+    \item The choice of approach in a DBMS is tightly coupled with its concurrency control scheme
+    \item The checkpoint thread(s) scans each table and writes out data asynchronously to disk
+\end{itemize}
+
+    \subsection*{Ideal Checkpoint Properties~\cite{p1539-ren}}
+    \begin{itemize}
+        \item Do \textbf{not} slow down regular txn processing
+        \item Do \textbf{not} introduce unacceptable latency spikes
+        \item Do \textbf{not} require excessive memory overhead
+    \end{itemize}
+
+    \subsection*{Consistent Checkpoints}
+    \begin{itemize}
+        \item Represents a consistent snapshot of the database at some point in time
+        \item No uncommitted changes
+        \item No additional processing during recovery
+    \end{itemize}
+
+    \subsection*{Fuzzy Checkpoints}
+    \begin{itemize}
+        \item The snapshot could contain records updated from transactions that have not finished yet
+        \item Must do additional processing to remove those changes
+        \item Write a \sql{BEGIN} and \sql{END} log
+    \end{itemize}
+
+    \subsection*{Checkpoint Contents}
+        \subsubsection*{Approach \#1: Complete Checkpoint}
+        \begin{itemize}
+            \item Write out every tuple in every table regardless of whether were modified since the last checkpoint
+            \item Nearly every system does this approach
+        \end{itemize}
+
+        \subsubsection*{Approach \#2: Delta Checkpoint}
+        \begin{itemize}
+            \item Write out only the tuples that were modified since the last checkpoint
+            \item Can merge checkpoints together in the background
+        \end{itemize}
+
+    \subsection*{Checkpoint Frequency}
+        \begin{itemize}
+            \item Taking a checkpoint too often causes the runtime performance to degrade
+            \item However, waiting a long time between checkpoints is just as bad
+            \subsubsection*{Approaches}
+            \begin{itemize}
+                \item Time-based
+                \item Log-File Size Threshold
+                \item On Shutdown (always done)
+            \end{itemize}
+        \end{itemize}
+
+
+
+\section{In-Memory Checkpoint Algorithms~\cite{p265-cao}}
+
+    \subsection*{Naive Snapshots}
+    \begin{itemize}
+        \item Block all transactions, and create a consistent copy of the entire database in a new location in memory and write the contents to disk
+        \item Two approaches for copying
+        \begin{itemize}
+            \item Do it yourself (tuple data only)
+            \item Let the OS do it for your (everything)
+        \end{itemize}
+        \subsubsection*{\dbSys{Hyper} - Fork Snapshots~\cite{p195-kemper}}
+        \begin{itemize}
+            \item Create a snapshot of the database by forking the DBMS process
+            \item Child process contains a consistent checkpoint if there are no active txns
+            \item Otherwise, use the in-memory undo log to roll back txns in the child process
+            \item Continue processing txns in the parent process
+        \end{itemize}
+    \end{itemize}
+
+
+
+    \subsection*{Copy-on-Update Snapshots}
+    \begin{itemize}
+        \item During the checkpoint, txns create new copies of data instead of overwriting it
+        \item Copies can be at different granularities (block, tuple)
+        \item The checkpoint thread then skips anything that was created after it started
+        \item Old data is pruned after it has been written to disk
+
+        \subsubsection*{\dbSys{VoltDB} - Consistent Checkpoints}
+        \begin{itemize}
+            \item A special txn starts a checkpoint and switches the DBMS into copy-on-write mode
+            \item Changes are no long made in-place to tables
+            \item the DBMS tracks whether a tuple has been inserted, deleted, or modified since the checkpoint started
+            \item A separate thread scans the tables and writes tuples out to the snapshot on disk
+            \item The separate thread also ignores anything changed after the checkpoint and cleans up old versions
+        \end{itemize}
+    \end{itemize}
+
+    \subsection*{Wait-Free ZigZag}
+    \begin{itemize}
+        \item Maintain two copies of the entire database
+        \item Each write only updates one copy
+        \item Use two BitMaps to keep track of what copy a txn should read/write from per tuple
+        \item Avoids the overhead of having to create copies on the fly as in the copy on update approach
+    \end{itemize}
+
+    \subsection*{Wait-Free PingPong}
+    \begin{itemize}
+        \item Trade extra memory + CPU to avoid pauses at the end of the checkpoint
+        \item Maintain two copies of the entire database at all times plus a third "base" copy
+        \item Pointer indicates which copy is the current master
+        \item At the end of the checkpoint, swap these pointers
+    \end{itemize}
+
+    \subsection*{Implementations}
+    \begin{itemize}
+        \item Bulk State Copying: Pause txn execution to take a snapshot
+        \item Locking/Latching: Use latches to isolate the checkpoint thread from the worker threads if they operate on shared regions
+        \item Bulk Bit-Map Reset: If DBMS uses BitMap to track dirty region, it must perform a bulk reset at the start of a new checkpoint
+        \item Memory Usage: To avoid asynchronous writes, the method may need to allocate additional memory for data copies
+    \end{itemize}
+
+
+\section{\dbSys{Facebook Scuba}}
+
+    \subsection*{Observation}
+    \begin{itemize}
+        \item Not all DBMS restarts are due to crashes
+        \begin{itemize}
+            \item Updating OS libraries
+            \item Hardware upgrades/fixes
+            \item \textbf{Updating DBMS software}
+        \end{itemize}
+        \item We need a way to be able to quickly restart the DBMS without having to re-read the entire database from disk again
+    \end{itemize}
+
+    \subsection*{Fast Restarts~\cite{p541-goel}}
+    \begin{itemize}
+        \item Decouple the in-memory database lifetime from the process lifetime
+        \item By storing the database shared memory, the DBMS process can restart and the memory contents will survive
+    \end{itemize}
+
+    \subsection*{Facebook Scuba}
+    \begin{itemize}
+        \item Distributed, in-memory DBMS for time-series event analysis and anomaly detection
+        \item Heterogenous architecture
+        \begin{itemize}
+            \item \textbf{Leaf Nodes}: Execute scans/filters on in-memory data
+            \item \textbf{Aggregator Nodes}: Combine results from leaf nodes
+        \end{itemize}
+    \end{itemize}
+
+    \subsection*{Shared Memory Restarts}
+
+        \subsubsection*{Shared Memory Heaps}
+        \begin{itemize}
+            \item All data is allocated in SM during normal operations
+            \item Have to use a custom allocator to subdivide memory segments for thread safety and scalability
+            \item Cannot use lazy allocation of backing pages with shared memory
+        \end{itemize}
+
+        \subsubsection*{Copy on Shutdown}
+        \begin{itemize}
+            \item All data is allocated in local memory during normal operations
+            \item On shutdown, copy data from heap to shared memory
+            \item When the admin initiates a restart command, the node halts ingesting updates
+            \item DBMS starts copying data from heap memory to shared memory
+            \item Once snapshot finishes, the DBMS restarts
+            \item On start up, check to see whether there is a valid database in shared memory to copy into its heap. Otherwise, the DBMS restarts from disk
+        \end{itemize}
+
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{13-checkpoints}
+
+\end{document}
