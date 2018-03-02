@@ -1,6 +1,6 @@
 \documentclass[11pt]{article}
 
-\newcommand{\lecturenumber}{8}
+\newcommand{\lecturenumber}{08}
 \newcommand{\lecturename}{OLTP Indexes - Part 1}
 \newcommand{\lecturedata}{2018-02-12}
 
@@ -15,12 +15,14 @@
 %% T-TREES
 %% ==================================================================
 \section{T-Trees}
-Order-preserving index Based on aVL Trees that is designed specifically for in-memory databases. 
+Order-preserving index Based on AVL Trees that is designed specifically for in-memory databases. 
 Instead of storing keys in nodes, store pointers to their original 
-values. Proposed in 1986 from database researchers at University of Wisconsin--Madison~\cite{P294}.
-Used in \dbSys{TimesTen} and other early in-memory DBMSs during 1990s.
+values. Threads perform breath-first search ordering of keys.
 
-Threads perform breath-first search ordering of keys.
+Proposed in 1986 from database researchers at University of Wisconsin--Madison~\cite{P294}.
+Used in \dbSys{TimesTen} and other early in-memory DBMSs developed 1990s. T-Trees are not used in 
+any new in-memory DBMS because they are not cache friendly.
+
 
 \textbf{Advantages:}
 \begin{itemize}
@@ -34,13 +36,13 @@ Threads perform breath-first search ordering of keys.
 \textbf{Disadvantages}:
 \begin{itemize}
     \item
-    Difficult to rebalance.
+    Difficult to re-balance.
     
     \item
     Difficult to implement safe concurrent access.
     
     \item
-    Have to chase pointers when scanning range or performing binary search insde of a node.
+    Have to chase pointers when scanning range or performing binary search inside of a node.
 \end{itemize}
 
 %% ==================================================================
@@ -49,7 +51,7 @@ Threads perform breath-first search ordering of keys.
 \section{Skip List}
 Multiple levels of linked lists with extra pointers that \textbf{skip} over intermediate nodes. 
 Proposed by researchers at the University of Maryland--College Park in the 1990s~\cite{p668-pugh}.
-The index kaintains keys in sorted order without requiring global rebalancing.
+The index maintains keys in sorted order without requiring global re-balancing.
 
 A collection of lists at different levels:
 \begin{itemize}
@@ -66,7 +68,7 @@ A collection of lists at different levels:
     In general, a level has half the keys of one below it.
 \end{itemize}
     
-The key idea of a skip list is that it is a \textbf{probibalistic data structure}. To insert a new 
+The key idea of a skip list is that it is a \textbf{probabilistic data structure}. To insert a new 
 key, flip a coin to decide how many levels to add the new key into. 
 Provides approximate O(log n) search times.
 
@@ -76,7 +78,7 @@ Provides approximate O(log n) search times.
     Uses less memory than a B+Tree (only if you do not include reverse pointers).
     
     \item
-    Insertions and deletions do not require rebalancing.
+    Insertions and deletions do not require re-balancing.
 \end{itemize}
 
 \textbf{Disadvantages:}
@@ -94,11 +96,11 @@ Provides approximate O(log n) search times.
 %% Order Perserving Indexes
 %% ----------------------------------------------------
 \subsection*{Concurrent Skip List}
-It is possible to implemment a concurrent skip list using only CaS 
+It is possible to implement a concurrent skip list using only CaS 
 instructions~\cite{hpugh-concurrent-tr1990}. The data structure only support links in one direction 
 because CaS can only swap one location in memory (i.e., one pointer) atomically.
-If the DBMS invokes operation on the index, it can never ``fail''. A txn can only abort due to 
-higher-level conflicts.
+If the DBMS invokes operation on the index, it can never ``fail''. A transaction can only abort due 
+to higher-level conflicts.
 
 \textbf{Insert:}
 \begin{itemize}
@@ -179,7 +181,7 @@ Threads never need to set latches or block.
     Delta physically points to base page.
     
     \item
-    Install delta adress in physical address slot of mapping table using CaS.
+    Install delta dress in physical address slot of mapping table using CaS.
 \end{itemize}
 
 \textbf{Key Idea \#2 -- Mapping Table:}
@@ -222,7 +224,7 @@ Threads never need to set latches or block.
     Traverse tree like regular B+tree.
     
     \item
-    If mapping table points to delta chain, stop at first occurence of search key.
+    If mapping table points to delta chain, stop at first occurrence of search key.
     
     \item
     Otherwise, perform binary search on base page.
@@ -253,7 +255,7 @@ Threads never need to set latches or block.
 %% Garbage Collection
 %% ----------------------------------------------------
 \subsection*{Garbage Collection}
-The Bw-Tree uses an epoch-based garbage collectoin scheme. Also called RCU in Linux.
+The Bw-Tree uses an epoch-based garbage collection scheme. Also called RCU in Linux.
 
 \begin{itemize}
     \item
