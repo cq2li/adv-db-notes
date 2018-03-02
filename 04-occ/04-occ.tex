@@ -14,9 +14,8 @@
 %% ==================================================================
 %% STORED PROCEDURES
 %% ==================================================================
-
 \section{Stored Procedures}
-Disk stalls are (almost) gone when execuing transactions in an in-memory DBMS.
+Disk stalls are (almost) gone when executing transactions in an in-memory DBMS.
 But there are still other stalls when an application uses \textbf{conversational} API to 
 execute queries on DBMS (e.g., JDBC/ODBC, wire protocols).
 Solutions to this problem:
@@ -33,7 +32,7 @@ This removes SQL parsing, binding, and planning (sometimes).
         
 \textbf{Query Batches:}
 Invoke multiple queries per network message.
-This reduces the number of network roundtrips
+This reduces the number of network round-trips
         
 \textbf{Stored Procedures:}
 A group of queries that form a logical unit and perform a particular task on behalf of an 
@@ -53,7 +52,7 @@ Advantages of Stored Procedures:
     Procedure reuse across applications.
     
     \item
-    Transpaerent sever-side transaction restarts on conflicts.
+    Transparent sever-side transaction restarts on conflicts.
 \end{itemize}
 
 Disadvantages of Stored Procedures:
@@ -163,14 +162,14 @@ write set
 transactions that         have \textbf{already} committed.
         
         \item Forward Validation:
-        Check whether the commiting transaction intersects its read/write sets with any active 
+        Check whether the committing transaction intersects its read/write sets with any active 
 transactions that         have \textbf{not} yet committed.
     \end{itemize}
     
     \item \textit{Write Phase:}
-    The DBMS Propogates the changes in the transactions write set to the database and makes them 
-    visible to other tnxs items. As each record is updated, the transaction releases the lock 
-acquired     during the Validation Phase
+    The DBMS propagates the changes in the transactions write set to the database and makes them 
+    visible to other transactions' items. As each record is updated, the transaction releases the 
+lock acquired     during the Validation Phase
 \end{itemize}
 
 \textbf{Timestamp Allocation:}~\cite{p209-yu}
@@ -185,7 +184,7 @@ acquired     during the Validation Phase
     Needs a back-off mechanism to prevent fast burn.
 
     \item \textit{Hardware Clock:}
-    The CPU maintains an internal clock (not wall clock) that is synchronized across all coreds.
+    The CPU maintains an internal clock (not wall clock) that is synchronized across all cores.
     Intel only. Not sure if it will exist in future CPUs.
     
     \item \textit{Hardware Counter:}
