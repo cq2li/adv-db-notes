@@ -11,165 +11,294 @@
 \maketitle
 \thispagestyle{plain}
 
+%% ==================================================================
+%% DATA ORGANIZATION
+%% ==================================================================
 \section{Data Organization}
+One can think of an in-memory database as a large array of bytes.
+The schema tells the DBMS how to convert the bytes into the appropriate type.
+Each tuple is prefixed with a header that contains its meta-data.
+
+Store tuples with fixed-length data makes it easy to compute the starting point of any tuple.
+Mapping virtual memory pages to database pages.
+
+%% ----------------------------------------------------
+%% Memory Pages
+%% ----------------------------------------------------
+\subsection*{Memory Pages}
 \begin{itemize}
-    \item One can think of an in-memory database as a large array of bytes
-    \begin{itemize}
-        \item The schema tells the DBMS how to convert the bytes into the appropriate type
-        \item Each tuple is prefixed with a header that contains its metadata
-    \end{itemize}
-    \item Store tuples with fixed-length data makes it easy to compute the starting point of any tuple
-    \item Mapping virtual memory pages to database pages
+    \item
+    The OS maps physical pages to virtual memory pages.
+    
+    \item
+    The CPU's \textit{memory management unit} (MMU) maintains a \textit{translation lookaside 
+    buffer} (TLB) that contains the physical address of a virtual memory page.
 \end{itemize}
 
-    \subsection*{Memory Pages}
-    \begin{itemize}
-        \item OS maps physical pages to virtual memory pages
-        \item The CPU's MMU maintains a TLB that contains the physical address of a virtual memory page
-    \end{itemize}
+%% ----------------------------------------------------
+%% Transparent Huge Pages
+%% ----------------------------------------------------
+\subsection*{Transparent Huge Pages}
+One potential optimization for an in-memory DBMS is to use ``huge'' memory pages. The default page 
+size is 4KB. Using larger pages means that it takes fewer TLB entries to map to a larger amount of 
+memory.
 
-    \subsection*{Transparent Huge Pages}
-    \begin{itemize}
-        \item Maintain large pages automatically (2MB to 1GB)
-        \item Each page has to be a contigous block of memory
-        \item Greatly reduces the \# of TLB entries and misses
-        \item Usually disabled because moving of pages stalls processes that attempt to access the memory mid move
-    \end{itemize}
+Linux supports a \textit{transparent huge pages} optimization that allows applications to 
+automatically take advantage of huge pages.
+\begin{itemize}
+    \item
+    All pages are automatically set to either 2MB or 1GB (depending on what the CPU supports).
+    
+    \item
+    Each page has to be a contiguous block of memory. The OS can fall-back to the default 4KB page 
+if     a large segment of memory is not available.
+\end{itemize}
 
+Most DBMSs tell you to disable huge pages because they can stall processes that attempt to access 
+a memory page while the OS is reorganizing layout.
+
+%% ==================================================================
+%% DATA REPRESENTATION
+%% ==================================================================
 \section{Data Representation}
-    \subsection*{Variable Precision Numbers}
+This determines how a DBMS stores the actual bits for a value in-memory.
+
+All integers are stored in their ``native'' C/C++ as specified by the IEEE-754 
+standard~\cite{ieee754}.
+
+%% ----------------------------------------------------
+%% Variable Precision Numbers
+%% ----------------------------------------------------
+\subsection*{Variable Precision Numbers}
+\begin{itemize}
+    \item
+    Inexact, variable-precision numeric type that uses the ``native'' C/C++ types specified by 
+    IEEE-754 standard.
+    
+    \item
+    Faster than arbitrary precision numbers because the CPU can execute instructions on them 
+    directly.
+    
+    \item
+    Example: \sql{FLOAT}, \sql{REAL}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Fixed Point Precision Numbers
+%% ----------------------------------------------------
+\subsection*{Fixed Point Precision Numbers}
+\begin{itemize}
+    \item
+    Numeric data types with arbitrary precision and scale.
+    Typically stored in exact, variable-length binary representation with additional meta-data.
+    
+    \item
+    Used when rounding errors are unacceptable.
+    
+    \item Example: \sql{NUMERIC}, \sql{DECIMAL}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% NULL Data Types
+%% ----------------------------------------------------
+\subsection*{NULL Data Types}
+
+\textbf{Approach \#1 -- Special Values:}
+\begin{itemize}
+    \item
+    Designate a value to represent \sql{NULL} for a particular 
+    data type (e.g., \texttt{INT32\_MIN}).
+    
+    \item
+    DBMS needs to make sure that the application does not try to insert a tuple with that value.
+\end{itemize}
+
+\textbf{Approach \#2 -- Null Column Bitmap:} 
+\begin{itemize}
+    \item
+    Store a bitmap in the header of every tuple that specifies 
+    which of its attributes are \sql{NULL}.
+    
+    \item
+    The length of the bitmap is usually the number of attributes in the tuple (even if those 
+    attributes are not null-able).
+    
+    \item
+    This is the most widely used approach in both disk-oriented and in-memory DBMSs.
+\end{itemize}
+
+\textbf{Approach \#3 -- Per Attribute Flag:}
+\begin{itemize}
+    \item
+    Store a prefix in-memory for an attribute that represents whether that value is \sql{NULL}. 
+
+    \item
+    Although the flag only needs to be a single bit (i.e., true/false), this approach has to 
+    use more space than just a single bit because this messes with word alignment.
+    For example, if the CPU fetches a value that is not word-aligned, it has to do 
+    extra work to provide the application with the correct value:
     \begin{itemize}
-        \item Inexact, variable-precision numeric type that uses the "native" C/C++ types
-        \item Store directly as specified by IEEE-754
-        \item Typically faster than arbitrary precision numbers
+        \item
+        Execute two reads to load the appropriate parts of the data word and reassemble them.
+        This is the approach used in all Intel CPUs and newer ARM CPUs.
+        
+        \item
+        Read some unexpected combination of bytes assembled into a single word.
+        
+        \item
+        Throw an exception.
     \end{itemize}
+    
+    \item
+    Only used by MemSQL.
+\end{itemize}
 
-    \subsection*{Fixed Point Precision Numbers}
-    \begin{itemize}
-        \item Numeric data types with arbitrar precision and scale
-        \item Used when rounding errors are unacceptable
-        \item Example: \sql{NUMERIC, DECIMAL}
-        \item Typically stored in exact, variable-length binary representation with additional meta-data
-    \end{itemize}
-
-    \subsection*{NULL Data Types}
-    \begin{itemize}
-        \item Choice \#1 - Special Values: Designate a value to represent \sql{NULL} for a particular data type (e.g. INT32\_MIN)
-        \item Choice \#2 - Null Column Bitmap Heade: Store a bitmap in the tuple header that specifies what attributes are NULL
-        \item Choice \#3- Per Attribute Null Flag: Store a flag that makrs that a value is Null. This approach uses more space than just a single bit because this messes with word alignment
-    \end{itemize}
-
-    \subsection*{Word-Aligned Tuples}
-    \begin{itemize}
-        \item If the CPU fetches a 64-bit value that is not word-aligned, it has three choices
-        \begin{itemize}
-            \item Execute two reads to load the appropriate parts of the data word and reassemble them
-            \item Read some unexpected combnation of bytes assembled into a 64-bit word
-            \item Throw an exception
-        \end{itemize}
-    \end{itemize}
-
-
+%% ==================================================================
+%% STORAGE MODELS
+%% ==================================================================
 \section{Storage Models}
 
-    \subsection*{N-Ary Storage Model (NSM)}
-    \begin{itemize}
-        \item The DBMS stores all of the attributes for a single tuple contigously
-        \item Ideal for OLTP workloads where txns tend to operate only an individual entity and insert heavy wrorkloads
-        \item Heap Organized Tables: Tuples are stored in blocks called a heap, and the heap does not necessarily define an order
-        \item Index-Organized Tables: Tuples are stored in the primary key index itself, but different from a clustered index
-        \subsubsection*{\textbf{Advantages}}
-        \begin{itemize}
-            \item Fast inserts, updates, and deletes
-            \item Good for queries that need the entire tuple
-            \item Can use index oriented physical storage
-        \end{itemize}
-        \subsubsection*{\textbf{Disadvanteges}}
-        \begin{itemize}
-            \item Not good for scanning large portions of the table and/or a subset of the attributes
-        \end{itemize}
-    \end{itemize}
+%% ----------------------------------------------------
+%% N-Ary Storage Model
+%% ----------------------------------------------------
+\subsection*{N-Ary Storage Model (NSM)}
+The DBMS stores all of the attributes for a single tuple contiguously.
+Also known as a ``row store''.
+This approach is ideal for OLTP workloads where transactions tend to operate only an individual 
+entity and insert heavy workloads.
 
-    \subsection*{Decomposition Storage Model (DSM)}
-    \begin{itemize}
-        \item The DBMS stores a single attribute for all tuples contigously in a block of data
-        \item Sometimes called vertical partitioning
-        \item Ideal for OLAP workloads where read-only queries perform large scans over a subset of the table's attributes
-        \item Use the vector-at-a-time iterator model
-
-        \subsubsection*{Tuple Identification Choices}
-        \begin{itemize}
-            \item Fixed length offsets: Each value is the same length for an attribute
-            \item Embedded Tuple Ids: Each value is stored with its tuple id in a column
-        \end{itemize}
-        \subsubsection*{Advantages}
-        \begin{itemize}
-            \item Reduces the amount of wasted work because the DBMS only reads the data that it needs
-            \item Better compression
-        \end{itemize}
-        \subsubsection*{Disadvanteges}
-        \begin{itemize}
-            \item Slow for point queries, inserts, updates, and deletes because of tuple splitting/stitching
-        \end{itemize}
-    \end{itemize}
-
-    \subsection*{Hybrid Storage Models}
-    \begin{itemize}
-        \item Single logical database instance that uses different storage models for hot and cold data
-        \item Data is "hot" when first entered into the database, as it is more likely to updated again near the future
-        \item Store new data in NSM for fast OLTP
-        \item Migrate data to DSM for more efficient OLAP
-
-        \subsubsection*{Separate Execution Engine}
-        \begin{itemize}
-            \item Run separate "internal" DBMSs that each only operate on DSM or NSM data
-            \item Needs combination of query results from both engines to appear as a single logical database to the application
-            \item Uses a synchrnization method (e.g. 2PC) if a txn spans execution engines
-            \item Approaches to do this are \textbf{Fractured Mirrors} (\dbSys{Oracle, IBM}) and \textbf{Delta Store} (\dbSys{SAP HANA})
-        \end{itemize}
-
-        \subsubsection*{Fractured Mirrors~\cite{p430-ramamurthy}}
-        \begin{itemize}
-            \item Store a second copy of the database in a DSM layout that is automatically updated
-            \item All updates are first entered in NSM then eventually copied into DSM mirror
-        \end{itemize}
-        \subsubsection*{Delta Store}
-        \begin{itemize}
-            \item Stage updates to the database in an NSM table
-            \item A background thread migrates updates from delta store and applies them to DSM data
-        \end{itemize}
-
-        \subsubsection*{Approaches for Categorizing Data}
-        \begin{itemize}
-            \item Manual: DBA specifies what tables should be stored in DSM
-            \item Off-Line: DBMS monitors access logs offline and them makes decisions about what data to move to DSM
-            \item On-Line: DBMS tracks access patterns at runtime and then mankes decision about what data to move to DSM
-        \end{itemize}
-    \end{itemize}
-
-\section{Peloton Adaptive Storage~\cite{p583-arulraj}}
+\textbf{Advantages:}
 \begin{itemize}
-    \item Employ a single execution engine architecture that is able to operate on both NSM and DSM data
-    \item No need to store two copies of the database
-    \item No need to sync multiple database segments
-    \item Note that a DBMS can still use a delta-store approach with this single-engine architecture
+    \item
+    Fast inserts, updates, and deletes.
+    
+    \item
+    Good for queries that need the entire tuple.
 \end{itemize}
 
-    \subsection*{Tile Architecture}
-    \begin{itemize}
-        \item Introduce an indirection layer that abstracts the true layout of tuples from query operators
-    \end{itemize}
+\textbf{Disadvantages:}
+\begin{itemize}
+    \item
+    Not good for scanning large portions of the table and/or a subset of the attributes.
+    This is because it pollutes the CPU cache by fetching data that is not needed for processing
+    the query.
+\end{itemize}
 
+There are two different ways to organize a NSM database:
+\begin{itemize}
+    \item \textbf{Heap Organized Tables:}
+    Tuples are stored in blocks called a heap, and the heap does not necessarily define an order.
+    
+    \item \textbf{Index-Organized Tables:}
+    Tuples are stored in the primary key index itself, but different from a clustered index.
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Decomposition Storage Model
+%% ----------------------------------------------------
+\subsection*{Decomposition Storage Model (DSM)}
+The DBMS stores a single attribute for all tuples contiguously in a block of data. Also known as a 
+``column store''. This model is ideal for OLAP workloads where read-only queries perform large scans 
+over a subset of the table's attributes. The DBMS is also able to use the vector-at-a-time iterator 
+model.
 
+\textbf{Advantages:}
+\begin{itemize}
+    \item
+    Reduces the amount of wasted work during query execution because the DBMS only reads the data 
+    that it needs for that query.
+    
+    \item
+    Enables better compression because all of the values for the same attribute are store 
+    contiguously in a single column.
+\end{itemize}
 
-    % ==================================================================
-    % BIBLIOGRAPHY
-    % ==================================================================
-    \newpage
-    \bibliographystyle{abbrvnat}
-    \bibliography{10-storage}
+\textbf{Disadvantages:}
+\begin{itemize}
+    \item
+    Slow for point queries, inserts, updates, and deletes because of tuple 
+    splitting/stitching.
+\end{itemize}
 
+%% ==================================================================
+%% HYBRID STORAGE MODELS
+%% ==================================================================
+\section{Hybrid Storage Models}
+Single logical database instance that uses different storage models for hot and cold 
+data. Data is ``hot'' when first entered into the database, as it is more likely to updated 
+again near the future. Thus, the DBMS can store new data in NSM for fast OLTP operations. It then 
+migrates data to DSM as it ages for more efficient OLAP.
 
+Approaches for Categorizing Data:
+\begin{itemize}
+    \item \textbf{Manual:}
+    DBA specifies what tables should be stored in DSM.
+    
+    \item \textbf{Off-Line:}
+    DBMS monitors access logs off-line and them makes decisions about what 
+    data to move to DSM.
+    
+    \item \textbf{On-Line:}
+    DBMS tracks access patterns at runtime and then makes decision about what data to move to DSM.
+\end{itemize}
 
+%% ----------------------------------------------------
+%% Decomposition Storage Model
+%% ----------------------------------------------------
+\subsection*{Approach \#1 -- Separate Execution Engine:}
+Run separate ``internal'' DBMSs that each only operate on DSM or NSM data.
+The system will combine of query results from both engines to appear as a single 
+logical database to the application.
+This requires a synchronization method (e.g., two-phase commit) if a transaction spans execution 
+engines.
+
+\textbf{Fractured Mirrors:}~\cite{p430-ramamurthy}
+\begin{itemize}
+    \item
+    Store a second copy of the database in a DSM layout that is automatically updated.
+    
+    \item
+    All updates are first entered in NSM then eventually copied into DSM mirror.
+    
+    \item
+    Examples: \dbSys{Oracle In-Memory Column Store}, \dbSys{IBM DB2 BLU}.
+\end{itemize}
+
+\textbf{Delta Store:}
+\begin{itemize}
+    \item
+    Stage updates to the database in an NSM table.
+    
+    \item
+    A background thread migrates updates from delta store and applies them to DSM data.
+    
+    \item
+    Examples: \dbSys{SAP HANA}, \dbSys{MemSQL}, \dbSys{Vertica}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Decomposition Storage Model
+%% ----------------------------------------------------
+\subsection{Approach \#2 -- Adaptive Storage}
+The DBMS uses single execution engine that is able to operate on both NSM and DSM 
+data~\cite{p583-arulraj}.
+
+\begin{itemize}
+    \item
+    No need to store two copies of the database.
+    
+    \item
+    No need to sync multiple database segments.
+    
+    \item
+    Note that a DBMS can still use a delta-store approach with this single-engine architecture.
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{10-storage}
 
 \end{document}
