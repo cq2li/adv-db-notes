@@ -1,7 +1,7 @@
 \documentclass[11pt]{article}
 
-\newcommand{\lecturenumber}{6}
-\newcommand{\lecturename}{Multi-Version Concurrency Control (MVCC) - Part 2}
+\newcommand{\lecturenumber}{06}
+\newcommand{\lecturename}{Multi-Version Concurrency Control (MVCC) -- Part 2}
 \newcommand{\lecturedata}{2018-02-05}
 
 \usepackage{../dbnotes}
@@ -11,126 +11,210 @@
 \maketitle
 \thispagestyle{plain}
 
+%% ==================================================================
+%% MICROSOFT HEKATON
+%% ==================================================================
 \section{\dbSys{Microsoft Hekaton}}
+Incubator project started in 2008 to create new in-memory OLTP engine for \dbSys{Microsoft SQL 
+Server}. Led by top database experts Paul Larson and Mike Zwilling. It was important that the new 
+engine integrated with \dbSys{MSSQL} ecosystem. It was also necessary that the engine support all 
+possible OLTP workloads with predictable performance.
+
+Key lessons:
 \begin{itemize}
-    \item Icubator project started in 2008 to create new OLTP engine for \dbSys{MSFT SQL Server}
-    \item Led by database ballers Paul Larson and Mike Zwilling
-    \item Had to integrate with \dbSys{MSSQL} ecosystem
-    \item Had to support all possible OLTP workloads with predicatable performance
+    \item
+    Use only lock-free data structures. This means no latches, spin locks, or critical 
+    sections for indexes, transaction map, memory allocator, garbage collector.
+        
+    \item
+    Only one single serialization point in the DBMS to get the transaction's begin and commit 
+    timestamp using an atomic addition (CAS).
 \end{itemize}
-    \subsection*{\dbSys{Hekaton} MVCC~\cite{p298-larson}}
-    \begin{itemize}
-        \item Each txn is assigned a timestamp when they begin (BeginTS) and when they commit (EndTS)
-        \item Each tuple contains two timestamps that represents their visibility and current state
-        \begin{itemize}
-            \item \textbf{BEGIN}: The BeginTS of the active txn or the EndTS of the committed txn that created it
-            \item \textbf{END}: The BeginTS of the active txn that created the next version or infinity or the EndTS of the committed txn that created it
 
-        \end{itemize}
-        \item Speculative Reads: Hekaton allows txns to read versions of transactions of uncommitted txns. Then checks in validations if the txns that it read uncommitted data committed
-        \item Does not allow speculative write: First txn to write lives, second gets aborted
-    \end{itemize}
+The Hekaton concurrency control relies on compare-and-swap to install new 
+versions~\cite{p298-larson}.
+\begin{itemize}
+    \item
+    Each transaction is assigned a timestamp when they begin (\texttt{BeginTS}) and when they 
+    commit (\texttt{EndTS}).
+        
+    \item
+    Each tuple contains two timestamps that represents their visibility and current state.
+    \begin{itemize}
+        \item \textbf{\texttt{BEGIN}}:
+        The \texttt{BeginTS} of the active transaction or the \texttt{EndTS} of the committed 
+        transaction that created it.
+            
+        \item \textbf{\texttt{END}}:
+        The \texttt{BeginTS} of the active transaction that created the next version or 
+        infinity or the \texttt{EndTS} of the committed transaction that created it.
 
-    \subsection*{Transaction State Map}
-    \begin{itemize}
-        \item Global map of all txns states in the system
-        \begin{itemize}
-            \item ACTIVE: The txn is executing read/write operations
-            \item VALIDATING: The txn has invoked commit and the DBMS is checking whether it is valid
-            \item COMMITTED: The txn is finished, but may not have updated its version's TS
-            \item TERMINDATED: The txn has updated the TS for all of the versions that it created
-        \end{itemize}
     \end{itemize}
-    \subsection*{Transaction Meta-Data}
-    \begin{itemize}
-        \item Read Set: Pointers to every version read
-        \item Write Set: Pointers to versions updated (old and new), versions deleted (old), and version inserted (new)
-        \item Scan Set: Stores enough information needed to perform each scan operation
-        \item Commit Dependencies: List of txns that are waiting for this txn to finish
-    \end{itemize}
-    \subsection*{Transaction Validation}
-    \begin{itemize}
-        \item Read Stability: Check that each version read is still visible as of the end of the txn
-        \item Phantom Avoidance: Repeat each scan to check whether new versions have become visible since the txn began
-        \item Extend of validation depends on isolation level
-        \begin{itemize}
-            \item \isoLevel{SERIALIZABLE}: Read Stability + Phantom Avoidance
-            \item \isoLevel{REPEATABLE READS}: Read Stability
-            \item \isoLevel{SNAPSHOT ISOLATION}: None
-            \item \isoLevel{READ COMMITTED}: None
-        \end{itemize}
-    \end{itemize}
-    \subsection*{Lessons}
-    \begin{itemize}
-        \item Use only lock-free data structures
-        \begin{itemize}
-            \item No latches, spin locks, or critical sections
-            \item Indexes, txn map, memory alloc, garbage collector
-        \end{itemize}
-        \item Only one single serialization point in the DBMS to get the txn's begin and commit timestamp using an Atomic Addition (CAS)
-    \end{itemize}
+    
+    \item Speculative Reads:
+    Hekaton allows transactions to read versions of transactions of uncommitted 
+    transactions. Then checks in validations if the transactions that it read uncommitted data 
+    committed.
+    The DBMS does not allow speculative write; first transaction to write a new version succeeds, 
+    second gets aborted.
+\end{itemize}
 
+%% ----------------------------------------------------
+%% Transaction State Map
+%% ----------------------------------------------------
+\subsection*{Transaction State Map}
+Global map of all transactions states in the system. Transactions have to consult this map to 
+determine the 
+state of a transaction.
+\begin{itemize}
+    \item \texttt{ACTIVE}:
+    The transaction is executing read/write operations.
+    
+    \item \texttt{VALIDATING}:
+    The transaction has invoked commit and the DBMS is checking whether it is valid.
+    
+    \item \texttt{COMMITTED}:
+    The transaction is finished, but may not have updated its version's \texttt{TS}.
+    
+    \item \texttt{TERMINATED}:
+    The transaction has updated the \texttt{TS} for all of the versions that it created.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Transaction Meta-Data
+%% ----------------------------------------------------
+\subsection*{Transaction Meta-Data}
+\begin{itemize}
+    \item \texttt{Read Set:}
+    Pointers to every version that the transaction read.
+    
+    \item \texttt{Write Set:}
+    Pointers to the versions that the transaction updated (old and new), deleted (old), 
+    and inserted (new).
+    
+    \item \texttt{Scan Set:}
+    Stores enough information needed to perform each scan operation.
+    
+    \item \texttt{Commit Dependencies:}
+    List of transactions that are waiting for this transaction to finish.
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Transaction Validation
+%% ----------------------------------------------------
+\subsection*{Transaction Validation}
+\begin{itemize}
+    \item \texttt{Read Stability:}
+    Check that each version read is still visible as of the end of 
+    the transaction.
+    
+    \item \texttt{Phantom Avoidance:}
+    Repeat each scan to check whether new versions have become visible since the transaction began.
+    
+    \item Extend of validation depends on isolation level:
+    \begin{itemize}
+        \item \isoLevel{SERIALIZABLE}: Read Stability + Phantom Avoidance.
+        \item \isoLevel{REPEATABLE READS}: Read Stability.
+        \item \isoLevel{SNAPSHOT ISOLATION}: None
+        \item \isoLevel{READ COMMITTED}: None
+    \end{itemize}
+\end{itemize}
+
+%% ==================================================================
+%% TUM HYPER
+%% ==================================================================
 \section{\dbSys{HyPer}}
-    \subsection*{Observations}
-    \begin{itemize}
-        \item Read/scan set validations are expensive if txns access a lot of data
-        \item Appending new versions hurts the performance of OLAP scans due to pointer chasing and branching
-        \item Record level conflict checks may be too coarse-grained and incur false positives
-    \end{itemize}
-    \subsection*{\dbSys{HyPer} MVCC~\cite{p677-neumann}}
-    \begin{itemize}
-        \item Designed for HTAP workloads
-        \item Column-store with delta record versioning
-        \begin{itemize}
-            \item In-Place updates for non-indexed attributes
-            \item Delete/Insert updates for indexed attributes
-            \item N2O version chains
-            \item No Predicate Locks and No Scan Checks
-        \end{itemize}
-        \item Avoids write-write conflicts by aborting txns that try to update an uncommitted object
-        \item Designed for HTAP workloads
-    \end{itemize}
-    \subsection*{Validation}
-    \begin{itemize}
-        \item First-Writer Wins
-        \begin{itemize}
-            \item The version vector always points to the last committed version
-            \item Do not need to check whether write-sets overlap
-        \end{itemize}
-        \item Check the undo buffers (i.e. delta records) of txns that committed after the validation txn started
-        \item Compare the committed txn's write set for phandoms using \textbf{Precision Locking}
-        \item Only need to store the txn's read predicates and not its entire read set
-    \end{itemize}
-    \subsection*{Version Synopsis}
-    \begin{itemize}
-        \item Store a separate column that tracks the position of the first and last versioned tuple in a block of tuples
-        \item When scanning tuples, the DBMS can check for strides of tuples without older versions and execute more efficiently
-    \end{itemize}
+Read/scan set validations are expensive if transactions access a lot of data. Appending new versions 
+hurts the performance of OLAP scans due to pointer chasing and branching. Record level conflict 
+checks may be too coarse-grained and incur false positives.
 
-
-\section{\dbSys{CMU Cicada}}
+\dbSys{HyPer} uses a MVCC implementation that is designed for HTAP workloads~\cite{p677-neumann}. 
+It is a column-store with delta record versioning. Avoids write-write conflicts by aborting 
+transactions that try to update an uncommitted object.
 \begin{itemize}
-    \item In-memory OLTP engine based on optimistic MVCC with append-only storage (N2O) ~\cite{p21-lim}
-    \begin{itemize}
-        \item Best-effort inlining
-        \item Loosely Synchronized Clocks
-        \item Contention Aware validation
-        \item Index Nodes Stored in Tables
-    \end{itemize}
-    \item Designed to be scalable for both low and high contention workloads
+    \item In-Place updates for non-indexed attributes
+    \item Delete/Insert updates for indexed attributes
+    \item N2O version chains
+    \item No Predicate Locks and No Scan Checks
 \end{itemize}
 
-    \subsection*{Best-Effort Inlining}
-    \begin{itemize}
-        \item Record meta-data is stored in a fixed location
-        \item Threads will attempt to inline read-mostly version within this meta-data to reduce version chain traversals
-    \end{itemize}
-    \subsection*{Fast Validation}
-    \begin{itemize}
-        \item Contention-aware Validation: Validate access to recently modified (high contention) records first
-        \item Early Consistency Check: Pre-validated access set before making global writes
-        \item If you know that recent txns committed succesfully, the skip Contention-Aware Validation and Early Consistency check
-        \item Incremental Version Search: Resume from last search location in version list
+%% ----------------------------------------------------
+%% Transaction Validation
+%% ----------------------------------------------------
+\subsection*{Transaction Validation}
+\begin{itemize}
+    \item \textbf{First-Writer Wins:}
+    The version vector always points to the last committed version. Do not 
+    need to check whether write-sets overlap.
+    
+    \item 
+    Check the undo buffers (i.e., delta records) of transactions that committed after the 
+    validation transaction started.
+    
+    \item
+    Compare the committed transaction's write set for phantoms using \textbf{Precision 
+    Locks}~\cite{jordan81}.
+    
+    \item
+    Only need to store the transaction's read predicates and not its entire read set.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Version Synopsis
+%% ----------------------------------------------------
+\subsection*{Version Synopsis}
+\begin{itemize}
+    \item
+    Store a separate column that tracks the position of the first and last versioned tuple in 
+    a block of tuples.
+
+    \item
+    When scanning tuples, the DBMS can check for strides of tuples without older versions and 
+    execute more efficiently.
+\end{itemize}
+
+%% ==================================================================
+%% CICADA
+%% ==================================================================
+\section{\dbSys{CMU Cicada}}
+In-memory OLTP engine based on optimistic MVCC with append-only storage (N2O)~\cite{p21-lim}.
+Designed to be scalable for both low and high contention workloads.
+\begin{itemize}
+    \item Best-effort in-lining
+    \item Loosely Synchronized Clocks
+    \item Contention Aware validation
+    \item Index Nodes Stored in Tables
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Best-Effort Inlining
+%% ----------------------------------------------------
+\subsection*{Best-Effort In-lining}
+\begin{itemize}
+    \item
+    Record meta-data is stored in a fixed location.
+    
+    \item
+    Threads will attempt to inline read-mostly version within this meta-data to reduce 
+    version chain traversals.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Fast Validation
+%% ----------------------------------------------------
+\subsection*{Fast Validation}
+\begin{itemize}
+    \item \textbf{Contention-aware Validation:}
+    Validate access to recently modified (high contention) records first.
+    
+    \item \textbf{Early Consistency Check:}
+    Pre-validated access set before making global writes.
+    
+    \item If the DBMS knows that most of the recently executed transactions committed successfully,
+    then it can skip Contention-Aware Validation and Early Consistency check
+    
+    \item \textbf{Incremental Version Search:}
+    Resume from last search location in version list.
 \end{itemize}
 
 
@@ -140,7 +224,5 @@
 \newpage
 \bibliographystyle{abbrvnat}
 \bibliography{06-mvcc2}
-
-
 
 \end{document}
