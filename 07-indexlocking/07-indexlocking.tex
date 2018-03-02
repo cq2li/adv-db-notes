@@ -11,151 +11,293 @@
 \maketitle
 \thispagestyle{plain}
 
+%% ==================================================================
+%% DATABASE INDEXES
+%% ==================================================================
 \section{Database Indexes}
+A data structure that improves the speed of data retrieval operations on a table at the 
+cost of additional writes and storage space.
+Indexes are used to quickly locate data without having to search every row in a table 
+every time a table is accessed.
+Indexes require different locking because the physical structure can change as long as 
+the logical contents are consistent.
+
+%% ----------------------------------------------------
+%% Order Perserving Indexes
+%% ----------------------------------------------------
+\subsection*{Order Preserving Indexes}
 \begin{itemize}
-    \item A data structure that improves the speed of data retrieval operations on a table at the cost of additional writes and storage space
-    \item Indexes are used to quickly locate data without having to search every row in a table every time a table is accessed
-    \item Indexes require different locking because the physical structure can change as long as the logical contents are consistent
+    \item
+    A tree structure that maintains keys in some sorted order.
+    
+    \item
+    Supports all possible predicates with O(log(n)) searches.
 \end{itemize}
 
-    \subsection*{Order Perserving Indexes}
-    \begin{itemize}
-        \item A tree-like structure that maintains keys in some sorted order
-        \item Suppports all possible predicates with O(log(n)) searches
-    \end{itemize}
-
+%% ----------------------------------------------------
+%% Hashing Indexes
+%% ----------------------------------------------------
 \subsection*{Hashing Indexes}
-    \begin{itemize}
-        \item An associative array that maps a hash of the key to a particular record
-        \item Only support equality predicates with O(1) searches
-    \end{itemize}
+\begin{itemize}
+    \item
+    An associative array that maps a hash of the key to a particular record.
+    
+    \item
+    Only support equality predicates with O(1) searches.
+\end{itemize}
 
+%% ----------------------------------------------------
+%% B-tree vs B+Tree
+%% ----------------------------------------------------
 \subsection*{B-tree vs B+Tree}
-    \begin{itemize}
-        \item The original \textbf{B-Tree} from 1972 stored ll values in all nodes in the tree
-        \item B-Tree was more memory efficient since each key only appeares once in the tree
-        \item \textbf{B+Tree} only stores values in leaf nodes, and inner nodes only guide the search process
-        \item In practice, people use B+Trees over B-Trees because its easier to manage concurrent index access because values are only in the leaf nodes
-    \end{itemize}
+\begin{itemize}
+    \item
+    The original \textbf{B-Tree} from 1972 stored values in all nodes in the tree~\cite{comer79}.
+    
+    \item
+    B-Tree was more memory efficient since each key only appears once in the tree.
+    
+    \item
+    \textbf{B+Tree} only stores values in leaf nodes, and inner nodes only guide the search
+    process.
+    
+    \item
+    In practice, people use B+Trees over B-Trees because its easier to manage concurrent 
+    index access because values are only in the leaf nodes.
+\end{itemize}
 
+%% ----------------------------------------------------
+%% Lock-Free Indexes Approaches
+%% ----------------------------------------------------
+\subsection*{Lock-Free Indexes Approaches}
+When somebody says that they have a ``lock-free'' index, it can mean one of two 
+things~\cite{graefe10}.
 
-\subsection*{\textbf{Lock-Free Indexes Approaches}}
-    \begin{itemize}
-        \item No Locks
-        \begin{itemize}
-            \item Txns don't acquire locks to access/modify database
-            \item Still have to use latches to install updates
-        \end{itemize}
-        \item No Latches
-        \begin{itemize}
-            \item Swap pointers using atomic updates to install changes
-            \item Still have to use locks to validate txns
-        \end{itemize}
-    \end{itemize}
+\textbf{No Locks}
+\begin{itemize}
+    \item Transactions do not acquire locks to access/modify database.
+    \item Still have to use latches to install updates.
+\end{itemize}
 
+\textbf{No Latches}
+\begin{itemize}
+    \item Swap pointers using atomic updates to install changes.
+    \item Still have to use locks to validate transactions.
+\end{itemize}
+
+%% ==================================================================
+%% LATCH IMPLEMENTATIONS
+%% ==================================================================
 \section{Latch Implementations}
-\begin{itemize}
-    \item Compare and Swap: Atomic instructuion that compares contents of a memory location $M$ to a given value $V$
-\end{itemize}
-\subsection*{\textbf{Blocking OS Mutex}}
-    \begin{itemize}
-        \item Simple to use
-        \item Non-scalable (about 25ns per lock/unlock invocation)
-        \item Example: std::mutex
-    \end{itemize}
-\subsection*{\textbf{Test-and-Set Spin Lock (TAS)}}
-    \begin{itemize}
-        \item Very efficient (single instruction to lock/unlock)
-        \item Non-scalable, not cache friendly
-        \item Example: std::atomic$<$T$>$
-    \end{itemize}
-\subsection*{\textbf{Queue-Based Spinlock (MCS)}}
-    \begin{itemize}
-        \item Also known as Mellor-Crummey and Scott (MCS)
-        \item More efficient than mutex, better cache locality
-        \item Non-trivial memory management
-        \item Example: std::atomic$<$Latch*$>$
-    \end{itemize}
-\subsection*{\textbf{Reader-Writer Locks}}
-    \begin{itemize}
-        \item Allows for concurrent readers
-        \item Have to manage read/write queues to avoid starvation
-        \item Can be implemented ontop of spinlocks
-    \end{itemize}
+\textbf{Compare and Swap}: Atomic instructuion that compares contents of a memory location $M$ to a 
+given value $V$.
 
+%% ----------------------------------------------------
+%% Blocking OS Mutex
+%% ----------------------------------------------------
+\subsection*{Blocking OS Mutex}
+\begin{itemize}
+    \item
+    Simple to use.
+    
+    \item
+    Non-scalable (about 25~ns per lock/unlock invocation).
+    
+    \item Example: \texttt{std::mutex}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Test-and-Set Spin Lock
+%% ----------------------------------------------------
+\subsection*{Test-and-Set Spin Lock (TAS)}
+\begin{itemize}
+    \item
+    Very efficient (single instruction to lock/unlock).
+    
+    \item
+    Non-scalable, not cache friendly.
+    
+    \item Example: \texttt{std::atomic<T>}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Queue-Based Spinlock
+%% ----------------------------------------------------
+\subsection*{Queue-Based Spin Lock (MCS)}
+\begin{itemize}
+    \item
+    Also known as Mellor-Crummey and Scott (MCS) locks.
+    
+    \item
+    More efficient than mutex, better cache locality.
+    But has non-trivial memory management.
+    
+    \item Example: std::atomic$<$Latch*$>$
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Reader-Writer Locks
+%% ----------------------------------------------------
+\subsection*{Reader-Writer Locks}
+\begin{itemize}
+    \item
+    Allows for concurrent readers.
+    
+    \item
+    Have to manage read/write queues to avoid starvation.
+    
+    \item
+    Can be implemented ontop of spin locks.
+\end{itemize}
+
+%% ==================================================================
+%% INDEX LATCHING
+%% ==================================================================
 \section{Index Latching}
+
+%% ----------------------------------------------------
+%% Latch Crabbing
+%% ----------------------------------------------------
 \subsection*{Latch Crabbing}
-    \begin{itemize}
-        \item Acquire and release latches on B+Tree nodes when traversing the data structure
-        \item A thread can release latch on a parent node if tis child node is considered \textbf{safe}
-        \begin{itemize}
-            \item A node is safe it wont split or merge when updated
-            \item Not full (on insertion)
-            \item More than half-full (on deletes)
-        \end{itemize}
-        \item Search: Start at root and go down, repeatedly acquiring read (\lock{R}) latch on child, and next unlocking parent
-        \item Insert/Delete: Start at root and go down, acquiring write (\lock{W}) latches if needed. Once child is locked, if it is safe, release all locks on ancestors
-        \item Issue: this locks the root as the first step each time, which is a large bottle neck
-    \end{itemize}
-
-\subsection*{Better Latch Crabbing~\cite{a1-bayer}}
-    \begin{itemize}
-        \item Optimistically assume that the leaf is safe
-        \begin{itemize}
-            \item Take \lock{R} latches as you traverse the tree to reach leaf and verify
-            \item If leaf is not safe, fallback to previous algorithm
-            \item Also called \textbf{optimistic lock coupling}
-        \end{itemize}
-    \end{itemize}
-
-\section{Index Locking Schemes}
 \begin{itemize}
-    \item \textbf{Crabbing does not protect from phantoms because we are releasing locks as soon as insert/delete operation ends}
-    \item There needs to be a way to protect the index's logical contents from other txns to avoid phantoms
-    \item Difference with index latches
+    \item
+    Acquire and release latches on B+Tree nodes when traversing the data structure.
+    
+    \item
+    A thread can release latch on a parent node if tis child node is considered \textbf{safe}:
     \begin{itemize}
-        \item Locks are held for the entire duration of a txn
-        \item Only acquired at the leaf nodes
-        \item Not physically stored in index data structure
+        \item
+        A node is safe it wont split or merge when updated.
+        
+        \item
+        Not full (on insertion).
+        
+        \item
+        More than half-full (on deletes).
     \end{itemize}
+    
+    \item \textbf{Search:}
+    Start at root and go down, repeatedly acquiring read (\lock{R}) latch on child, 
+    and next unlocking parent.
+    
+    \item \textbf{Insert/Delete:}
+    Start at root and go down, acquiring write (\lock{W}) latches if 
+    needed. Once child is locked, if it is safe, release all locks on ancestors
 \end{itemize}
-\subsection*{\textbf{Predicate Locks}~\cite{p624-eswaran}}
-    \begin{itemize}
-        \item Proposed locking scheme from \dbSys{System R}
-        \item Shared lock on the predicate in a \sql{WHERE} clause of a \sql{SELECT} query
-        \item Exclusive lock on the predicate in a \sql{WHERE} clause of any \sql{UPDATE},\sql{INSERT}, and \sql{DELETE}
-        \item Never implemented in any system
-        \item Precision locks are a simplification of predicate locks
-        \item Can determine if there will be a conflict by looking at the query without having to run it
-        \item Not used in practice
-    \end{itemize}
 
-\subsection*{\textbf{Key-Value Locks}}
-    \begin{itemize}
-        \item Locks that cover a single key value
-        \item Need "virtual keys" for non-existent values
-        \item Can't store lock in index
-    \end{itemize}
+%% ----------------------------------------------------
+%% Better Latch Crabbing
+%% ----------------------------------------------------
+\subsection*{Better Latch Crabbing}
+The problem with the previous latch crabbing approach is that it requires each thread to lock the 
+root as the first step each time. This is a major bottleneck.
 
-\subsection*{\textbf{Gap Locks}}
-    \begin{itemize}
-        \item Each txn acquires a key-value lock on the single key that it wants to access, then get a gap lock on the next key gap
-        \item Can't store lock in index
-    \end{itemize}
+A better approach is to optimistically assume that the leaf is safe~\cite{a1-bayer}.
+\begin{itemize}
+    \item
+    Take \lock{R} latches as you traverse the tree to reach leaf and verify.
+    
+    \item
+    If leaf is not safe, then fallback to previous algorithm.
+\end{itemize}
 
-\subsection*{\textbf{Key-Range Locks}}
-    \begin{itemize}
-        \item A txn takes locks on ranges in the key space
-        \item Each range is from one key that appears in the relation, to the next that appears
-        \item Define lock modes so conflict table will capture commutativity of the of the operations available
-    \end{itemize}
-\subsection*{\textbf{Hierarchical Locking}}
-    \begin{itemize}
-        \item Allow for a txn to hold wider key-range locks with different locking modes
-        \item Reduces the number of visits to lock manager
-        \item Allows for nesting of compatible locks (e.g. an \lock{X} lock inside an \lock{IX} key-range lock)
-    \end{itemize}
+%% ==================================================================
+%% INDEX LOCKING SCHEMES
+%% ==================================================================
+\section{Index Locking Schemes}
+Crabbing does not protect from phantoms because we are releasing locks as soon as 
+insert/delete operation ends. There needs to be a way to protect the index's logical contents from 
+other transactions to avoid phantoms.
 
+Difference with index latches:
+\begin{itemize}
+    \item
+    Locks are held for the entire duration of a transaction.
+    
+    \item
+    Only acquired at the leaf nodes.
+    
+    \item
+    Not physically stored in index data structure.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Predicate Locks
+%% ----------------------------------------------------
+\subsection*{Predicate Locks}
+Proposed locking scheme from \dbSys{IBM System R}~\cite{p624-eswaran}. But not used in practice and 
+never implemented in any system.
+
+\begin{itemize}
+    \item
+    Shared lock on the predicate in a \sql{WHERE} clause of a \sql{SELECT} query.
+    
+    \item
+    Exclusive lock on the predicate in a \sql{WHERE} clause of any \sql{UPDATE},\sql{INSERT}, 
+    and \sql{DELETE}.
+    
+    \item
+    Precision locks are a simplification of predicate locks.
+    
+    \item
+    Can determine if there will be a conflict by looking at the query without having to run it.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Key-Value Locks
+%% ----------------------------------------------------
+\subsection*{Key-Value Locks}
+\begin{itemize}
+    \item Locks that cover a single key value.
+    \item Need ``virtual keys'' for non-existent values.
+    \item Cannot store lock in index.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Gap Locks
+%% ----------------------------------------------------
+\subsection*{Gap Locks}
+\begin{itemize}
+    \item
+    Each transaction acquires a key-value lock on the single key that it wants to access, then get 
+    a gap lock on the next key gap.
+    
+    \item
+    The DBMS cannot store lock in an index node because the physical location of a node can change.
+    This means that the DBMS has to scan all of the index nodes to find the locks that a 
+    transaction holds in order to release them.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Key-Range Locks
+%% ----------------------------------------------------
+\subsection*{Key-Range Locks}
+\begin{itemize}
+    \item
+    A transaction takes locks on ranges in the key space.
+    
+    \item
+    Each range is from one key that appears in the relation, to the next that appears.
+    
+    \item
+    Define lock modes so conflict table will capture commutativity of the of the operations 
+    available.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% KeyHierarchical Locking
+%% ----------------------------------------------------
+\subsection*{Hierarchical Locking}
+\begin{itemize}
+    \item
+    Allow for a transaction to hold wider key-range locks with different locking modes.
+    
+    \item
+    Reduces the number of visits to lock manager.
+    
+    \item Allows for nesting of compatible locks (e.g., an \lock{X} lock inside an \lock{IX} 
+    key-range lock).
+\end{itemize}
 
 % ==================================================================
 % BIBLIOGRAPHY
