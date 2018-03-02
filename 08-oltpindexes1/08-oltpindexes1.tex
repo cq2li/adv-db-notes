@@ -11,26 +11,43 @@
 \maketitle
 \thispagestyle{plain}
 
-\section{T-Trees ~\cite{P294}}
-\begin{itemize}
-    \item Based on AVL Trees. Instead of storing keys in nodes, store pointers to their original values
-    \item Proposed in 1986 from Univ. of Wisconsin
-    \item Used in TimesTen and other early in-memory DBMSs during 1990s
-    \item Breath-First Search ordering of keys
-\end{itemize}
-\subsection*{Advantages}
-    \begin{itemize}
-        \item Uses less memory because it does not store keys inside of each node
-        \item Inner nodes contain key/value pairs (like B-Tree)
-    \end{itemize}
-\subsection*{Disadvantages}
-    \begin{itemize}
-        \item Difficult to rebalance
-        \item Difficult to implement safe concurrent access
-        \item Have to chase pointers when scanning range or performing binary search insde of a node
-    \end{itemize}
+%% ==================================================================
+%% T-TREES
+%% ==================================================================
+\section{T-Trees}
+Based on AVL Trees. Instead of storing keys in nodes, store pointers to their original 
+values. Proposed in 1986 from database researchers at University of Wisconsin--Madison~\cite{P294}.
+Used in \dbSys{TimesTen} and other early in-memory DBMSs during 1990s.
 
-\section{Skip List~\cite{p668-pugh}}
+Threads perform breath-first search ordering of keys.
+
+\textbf{Advantages:}
+\begin{itemize}
+    \item
+    Uses less memory because it does not store keys inside of each node.
+    
+    \item
+    Inner nodes contain key/value pairs (like B-Tree).
+\end{itemize}
+
+\textbf{Disadvantages}:
+\begin{itemize}
+    \item
+    Difficult to rebalance.
+    
+    \item
+    Difficult to implement safe concurrent access.
+    
+    \item
+    Have to chase pointers when scanning range or performing binary search insde of a node.
+\end{itemize}
+
+%% ==================================================================
+%% T-TREES
+%% ==================================================================
+\section{Skip List}
+
+~\cite{p668-pugh}
 \begin{itemize}
     \item Multiple levels of linked lists with extra pointers that \textbf{skip} over intermediate nodes
     \item Maintains keys in sorted order without requiring global rebalancing
