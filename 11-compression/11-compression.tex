@@ -11,47 +11,69 @@
 \maketitle
 \thispagestyle{plain}
 
+%% ==================================================================
+%% SYSTEM CATALOGS
+%% ==================================================================
 \section{System Catalogs}
-    \begin{itemize}
-        \item Almost every DBMS stores their database catlog in itself
-        \begin{itemize}
-            \item Wrap object abstraction around tuples
-            \item Specialized code for "bootstrapping" catalog tables
-        \end{itemize}
-        \item The entire DBMS should be aware of transactions in order to automatically provide ACID guarantees for DDL commands and concurrent txns
-        \item \textbf{Actions that modify the catalog should be treated like transactions to allow for ACID guarantees}
-    \end{itemize}
+Almost every DBMS stores their database catlog in itself. This requires specialized code for 
+``bootstrapping'' catalog tables.
+The meta-data are tuples stored in the database, but the DBMS code itself is written an imperative 
+language. Thus, we need to wrap object abstraction around tuples.
 
-    \subsection*{\textbf{Schema Changes}}
+The entire DBMS should be aware of transactions in order to automatically provide ACID 
+guarantees for DDL commands and concurrent txns.
+Actions that modify the catalog should be treated like transactions to allow for ACID guarantees.
 
-        \subsubsection*{\sql{add column}}
-        \begin{itemize}
-            \item NSM: Copy tuples into new region in memory
-            \item DSM: Just create the new column segment
-        \end{itemize}
-        \subsubsection*{\sql{Drop column}}
-        \begin{itemize}
-            \item NSM \# 1: Copy tuples into new region of memory
-            \item NSM \# 2: Mark column as "depracated", clean up later
-            \item DSM: Drop the column and free memory
-        \end{itemize}
-        \subsubsection*{\sql{Change Column}}
-        \begin{itemize}
-            \item Check whether the conversion is allowed to happen
-            \item Depends on default values
-        \end{itemize}
-        \subsubsection*{\sql{Create Index}}
-        \begin{itemize}
-            \item Scan the entire table and populate the index
-            \item Have to record changes made by txns that modified the table while another txn was building the index
-            \item When the scan completes, lock the table and resolve changes that were missed after the scan started
-        \end{itemize}
-        \subsubsection*{\sql{Drop Index}}
-        \begin{itemize}
-            \item Drop the index logically from the catalog
-            \item It only becomes "invisible" when the txn that dropped it commits
-            \item All existing txns will still have to update it
-        \end{itemize}
+%% ----------------------------------------------------
+%% Schema Changes
+%% ----------------------------------------------------
+\subsection*{Schema Changes}
+
+\textbf{Add Column:}
+\begin{itemize}
+    \item NSM:
+    Copy tuples into new region in memory.
+    
+    \item DSM:
+    Just create the new column segment.
+\end{itemize}
+
+\textbf{Drop Column:}
+\begin{itemize}
+    \item NSM \# 1: 
+    Copy tuples into new region of memory.
+    
+    \item NSM \# 2: 
+    Mark column as ``depracated'', clean up later.
+    
+    \item DSM:
+    Drop the column and free memory.
+\end{itemize}
+
+\textbf{Change Column:}
+\begin{itemize}
+    \item
+    Check whether the conversion is allowed to happen.
+    
+    \item
+    Depends on default values.
+\end{itemize}
+
+\subsubsection*{\sql{Create Index}}
+\begin{itemize}
+    \item Scan the entire table and populate the index
+    \item Have to record changes made by txns that modified the table while another txn was 
+building the index
+    \item When the scan completes, lock the table and resolve changes that were missed after the 
+scan started
+\end{itemize}
+
+\subsubsection*{\sql{Drop Index}}
+\begin{itemize}
+    \item Drop the index logically from the catalog
+    \item It only becomes "invisible" when the txn that dropped it commits
+    \item All existing txns will still have to update it
+\end{itemize}
 
     \subsection*{Sequences}
     \begin{itemize}
