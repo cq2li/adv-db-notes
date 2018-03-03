@@ -15,7 +15,7 @@
 %% SYSTEM CATALOGS
 %% ==================================================================
 \section{System Catalogs}
-Almost every DBMS stores their database catlog in itself. This requires specialized code for 
+Almost every DBMS stores their database catalog in itself. This requires specialized code for 
 ``bootstrapping'' catalog tables.
 The meta-data are tuples stored in the database, but the DBMS code itself is written an imperative 
 language. Thus, we need to wrap object abstraction around tuples.
@@ -27,7 +27,7 @@ Actions that modify the catalog should be treated like transactions to allow for
 %% ----------------------------------------------------
 %% Schema Changes
 %% ----------------------------------------------------
-\subsection*{Schema Changes}
+\subsection{Schema Changes}
 
 \textbf{Add Column:}
 \begin{itemize}
@@ -44,7 +44,7 @@ Actions that modify the catalog should be treated like transactions to allow for
     Copy tuples into new region of memory.
     
     \item NSM \# 2: 
-    Mark column as ``depracated'', clean up later.
+    Mark column as ``deprecated, clean up later.
     
     \item DSM:
     Drop the column and free memory.
@@ -70,9 +70,9 @@ Actions that modify the catalog should be treated like transactions to allow for
     modified the table while another transaction was building the index.
     
     \item
-    When the scan completes, the index building transaction locks the table and resolve changes that 
-    were missed after the scan started. This ensures that there are no false negatives or false 
-    positives.
+    When the scan completes, the index building transaction locks the table and resolve changes 
+that     were missed after the scan started. This ensures that there are no false negatives or 
+false     positives.
 \end{itemize}
 
 \textbf{Drop Index}
@@ -85,7 +85,7 @@ Actions that modify the catalog should be treated like transactions to allow for
 %% ----------------------------------------------------
 %% Sequences
 %% ----------------------------------------------------
-\subsection*{Sequences}
+\subsection{Sequences}
 \begin{itemize}
     \item
     Typically stored in the catalog and used for maintaining a global counter.
@@ -132,7 +132,7 @@ Given this, we want a database compression scheme to have the following properti
     Any kind of \textbf{lossy} compression has to be performed at the application level.
 \end{itemize}
 % 
-%     \subsection*{Zone Maps}
+%     \subsection{Zone Maps}
 %     \begin{itemize}
 %         \item Pre-computed aggregates for blocks of data
 %         \item DBMS can check the zone map first to decide whether it wants to access the block
@@ -141,7 +141,7 @@ Given this, we want a database compression scheme to have the following properti
 %% ----------------------------------------------------
 %% Compression Granularity
 %% ----------------------------------------------------
-\subsection*{Compression Granularity}
+\subsection{Compression Granularity}
 \begin{itemize}
     \item \textbf{Block Level:}
     Compress a block of tuples for the same table.
@@ -150,7 +150,8 @@ Given this, we want a database compression scheme to have the following properti
     Compress the contents of the entire tuple (NSM only).
     
     \item \textbf{Attribute Level:}
-    Compress a single attribute value within one tuple. This approach can target multiple attributes 
+    Compress a single attribute value within one tuple. This approach can target multiple 
+attributes 
     for the same tuple. It is possible to 
     
     \item \textbf{Columnar Level:}
@@ -194,20 +195,20 @@ encoding scheme in order to decipher it.
 %% ----------------------------------------------------
 %% Run-Length Encoding
 %% ----------------------------------------------------
-\subsection*{Run-Length Encoding}
+\subsection{Run-Length Encoding (RLE)}
 Compress runs of the same value in a single column into triplets~\cite{p31-roth}.
 \begin{itemize}
     \item The value of the attribute
     \item The start position in the column segment
     \item The \# of elements in the run
 \end{itemize}
-Requires the columns to be sorted intelligently to maximize compression opportunitites.
+Requires the columns to be sorted intelligently to maximize compression opportunities.
 
 %% ----------------------------------------------------
 %% Bitmap Encoding
 %% ----------------------------------------------------
-\subsection*{Bitmap Encoding}
-Store a separate Bitmap for each unqiue value for a particular attribute where an offset 
+\subsection{Bitmap Encoding}
+Store a separate Bitmap for each unique value for a particular attribute where an offset 
 in the vector corresponds to a tuple~\cite{franklin14}.
 \begin{itemize}
     \item The $i^{th}$ position in the Bitmap corresponds to the $i^{th}$ tuple in the table
@@ -218,7 +219,7 @@ Only practical if the value cardinality is low.
 %% ----------------------------------------------------
 %% Delta Encoding
 %% ----------------------------------------------------
-\subsection*{Delta Encoding}
+\subsection{Delta Encoding}
 Record the difference between values that follow each other in the same column.
 The base value can be stored in-line or in a separate look-up table.
 Can be combined with RLE to get even better compression ratios.
@@ -226,14 +227,14 @@ Can be combined with RLE to get even better compression ratios.
 %% ----------------------------------------------------
 %% Incremental Encoding
 %% ----------------------------------------------------
-\subsection*{Incremental Encoding}
+\subsection{Incremental Encoding}
 Type of delta encoding whereby common prefixes or suffixes and their lengths are recorded 
 so that they need not be duplicated. This works best with sorted data.
 
 %% ----------------------------------------------------
 %% Mostly Encoding
 %% ----------------------------------------------------
-\subsection*{Mostly Encoding}
+\subsection{Mostly Encoding}
 When the values for an attribute are ``mostly'' less than the largest size, you can store 
 them as a smaller data type.
 The remaining values that cannot be compressed are stored in their raw form in a separate 
@@ -251,7 +252,7 @@ A dictionary compression scheme needs to support fast encoding/decoding, as well
 %% ----------------------------------------------------
 %% Dictionary Construction
 %% ----------------------------------------------------
-\subsection*{Dictionary Construction}
+\subsection{Dictionary Construction}
 
 \textbf{Approach \#1 -- All-at-Once:}
 \begin{itemize}
@@ -274,9 +275,9 @@ A dictionary compression scheme needs to support fast encoding/decoding, as well
 %% ----------------------------------------------------
 %% Dictionary Scope
 %% ----------------------------------------------------
-\subsection*{Dictionary Scope}
+\subsection{Dictionary Scope}
 
-\textbf{Approach \#1 -- Lock Level}
+\textbf{Approach \#1 -- Lock Level:}
 \begin{itemize}
     \item
     Only include a subset of tuples within a single table.
@@ -288,7 +289,7 @@ A dictionary compression scheme needs to support fast encoding/decoding, as well
     Potentially lower compression ratio, but adding new tuples is easier.
 \end{itemize}
 
-\textbf{Approach \#2 -- Table Level}
+\textbf{Approach \#2 -- Table Level:}
 \begin{itemize}
     \item
     Construct a dictionary for the entire table.
@@ -297,48 +298,71 @@ A dictionary compression scheme needs to support fast encoding/decoding, as well
     Better compression ratio, but expensive to update.
 \end{itemize}
 
-\textbf{Approach \#3 -- Multi-Table}
+\textbf{Approach \#3 -- Multi-Table:}
 \begin{itemize}
     \item
     Can be either subset or entire tables.
     
     \item
     Sometimes helps with joins and set operations.
+    For example, if two tables are connected via a foreign key and if the columns in both 
+    tables use the same dictionary, them the DBMS does not have to re-encode the values when it 
+    joins those tables together.
 \end{itemize}
 
-    \subsection*{Attribute Encoding}
-    \begin{itemize}
-        \item Instead of storing a single value per dictionary entry, store entries that span attributes
-    \end{itemize}
+%% ----------------------------------------------------
+%% Dictionary Scope
+%% ----------------------------------------------------
+%     \subsection{Attribute Encoding}
+%     \begin{itemize}
+%         \item Instead of storing a single value per dictionary entry, store entries that span 
+% attributes
+%     \end{itemize}
 
-\section{Dictionary Encoding and Decoding}
+%% ----------------------------------------------------
+%% Encoding and Decoding
+%% ----------------------------------------------------
+\subsection{Encoding and Decoding}
+A dictionary needs to support two operations:
 \begin{itemize}
-    \item A dictionary needs to support two operations
-    \begin{itemize}
-        \item \textbf{Encoding}: For a givin uncompressed value, convert it into its compressed form
-        \item \textbf{Decode}: For a given compressed value, convert it back into its original form
-        \item No magic hash function will do this for us
-        \item Requires two data structures to support operations in both directions
-    \end{itemize}
+    \item \textbf{Encoding}:
+    For a given uncompressed value, convert it into its compressed form.
+    
+    \item \textbf{Decode}:
+    For a given compressed value, convert it back into its original form.
+    
+    \item
+    No magic hash function will do this for us.
+    
+    \item
+    Requires two data structures to support operations in both directions.
+    The encoded values need to support sorting in the same order as original values.
 \end{itemize}
 
-    \subsection*{Order Preserving Compression}
-    \begin{itemize}
-        \item The encoded values need to support sorting in the same order as original values
-    \end{itemize}
+%% ----------------------------------------------------
+%% Dictionary Implementations
+%% ----------------------------------------------------
+\subsection{Dictionary Implementations}
 
-\section{Dictionary Implementations}
-    \subsection*{Hash Table}
-    \begin{itemize}
-        \item Fast and compact
-        \item Unable to support range and prefix queries
-    \end{itemize}
-    \subsection*{B+ Tree}
-    \begin{itemize}
-        \item Slower than a hash table and takes more memory
-        \item Can support range and prefix queries
-        \item Shared-Leaves Trees ~\cite{p283-binnig}
-    \end{itemize}
+\textbf{Approach \#1 -- Hash Table:}
+\begin{itemize}
+    \item
+    Fast and compact.
+    
+    \item
+    Unable to support range and prefix queries.
+\end{itemize}
+
+\textbf{Approach \#1 -- B+ Tree:}
+\begin{itemize}
+    \item
+    Slower than a hash table and takes more memory.
+    \item
+    Can support range and prefix queries.
+    
+    \item
+    Use a shared leaf node design to minimize the amount of redundant data~\cite{p283-binnig}.
+\end{itemize}
 
 
 % ==================================================================
