@@ -1,0 +1,26 @@
+# Open Database Connectivity
+
+1. Standard API for accessing DBMS. ODBC is designed to be independent of database systems and operating systems. An application written using ODBC can be ported to other platforms, both on the client and server side, with few changes to the data access code.
+
+2. ODBC was originally developed by Microsoft and Simba Technologies during the early 1990s.
+
+3. ODBC is based on the device driver model, where the driver encapsulates the logic needed to convert a standard set of commands and functions into the specific calls required by the underlying system. A driver encapsulate many functions that can be broken down into categories:
+    + One set of functions is primarily concerned with finding, connecting to and disconnecting from the DBMS that driver talks to.
+    + A second set is used to send SQL commands from the ODBC system to the DBMS, converting or interpreting any commands that are not supported internally. For instance, a DBMS that does not support cursors can emulate this functionality in the driver.
+    + Finally, another set of commands, mostly used internally, is used to convert data from the DBMS's internal formats to a set of standardized ODBC formats, which are based on the C language formats.
+
+%% ==================================================================
+
+# Java Database Connectivity
+
+1. Sun Microsystems used ODBC as the basis for their own open standard, Java Database Connectivity (JDBC). JDBC can be considered a version of ODBC for the programming language Java instead of C.
+
+2. Four types of JDBC drivers
+    + JDBC-ODBC Bridge: Convert JDBC method calls into ODBC function calls. No longer supported as of JDK 1.8
+    + Native-API Driver: Converts JDBC method calls into native calls of the database API.
+    + Network-Protocol Driver: Driver connects to a middleware between the calling program and the DBMS. The middleware converts JDBC calls directly or indirectly into a vendor-specific database protocol.
+    + Database-Protocol Driver: Driver implementation that converts JDBC calls directly into a vendor-specific database protocol.
+    
+%% ==================================================================
+
+# Database Networking Protocols
