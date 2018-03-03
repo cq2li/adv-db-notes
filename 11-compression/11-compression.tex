@@ -21,7 +21,7 @@ The meta-data are tuples stored in the database, but the DBMS code itself is wri
 language. Thus, we need to wrap object abstraction around tuples.
 
 The entire DBMS should be aware of transactions in order to automatically provide ACID 
-guarantees for DDL commands and concurrent txns.
+guarantees for DDL commands and concurrent transactions.
 Actions that modify the catalog should be treated like transactions to allow for ACID guarantees.
 
 %% ----------------------------------------------------
@@ -59,177 +59,252 @@ Actions that modify the catalog should be treated like transactions to allow for
     Depends on default values.
 \end{itemize}
 
-\subsubsection*{\sql{Create Index}}
+\textbf{Create Index}
 \begin{itemize}
-    \item Scan the entire table and populate the index
-    \item Have to record changes made by txns that modified the table while another txn was 
-building the index
-    \item When the scan completes, lock the table and resolve changes that were missed after the 
-scan started
+    \item
+    Scan the entire table and populate the index.
+    Can use one or multiple threads. This is done in the context of a transaction.
+    
+    \item
+    While the system is building the index, it also has to record changes made by transactions that 
+    modified the table while another transaction was building the index.
+    
+    \item
+    When the scan completes, the index building transaction locks the table and resolve changes that 
+    were missed after the scan started. This ensures that there are no false negatives or false 
+    positives.
 \end{itemize}
 
-\subsubsection*{\sql{Drop Index}}
+\textbf{Drop Index}
 \begin{itemize}
     \item Drop the index logically from the catalog
-    \item It only becomes "invisible" when the txn that dropped it commits
-    \item All existing txns will still have to update it
+    \item It only becomes "invisible" when the transaction that dropped it commits
+    \item All existing transactions will still have to update it
 \end{itemize}
 
-    \subsection*{Sequences}
-    \begin{itemize}
-        \item Typically stored in the catalog and used for maintaining a global counter
-        \item Also called "auto-increment" or "serial" keys
-        \item Sequences are not maintained with the same isolation protection as regular catalog entries
-        \item \textbf{Rolling back a txn that incremented a sequence does not rollback the change to that sequence}
-    \end{itemize}
+%% ----------------------------------------------------
+%% Sequences
+%% ----------------------------------------------------
+\subsection*{Sequences}
+\begin{itemize}
+    \item
+    Typically stored in the catalog and used for maintaining a global counter.
+    Also called ``auto-increment'' or ``serial'' keys.
+    
+    \item
+    Sequences are not maintained with the same isolation protection as regular catalog 
+    entries. This is because rolling back a transaction that incremented a sequence does not 
+    rollback the change to that sequence.
+\end{itemize}
 
+%% ==================================================================
+%% DATABASE COMPRESSION
+%% ==================================================================
+\section{Database Compression}
+I/O is (almost) always the main bottleneck if the DBMS has to fetch data from disk. Thus, 
+compression in these systems (almost) improves performance.
 
-\section{Compression}
+In-memory DBMSs are more complicated since they do not have to fetch data from disk to execute a 
+query. But compressing the database reduces DRAM requirements and processing. They have to strike a 
+balance between \textbf{speed} vs. \textbf{compression ratio}. In-memory DBMSs always choose 
+speed.
 
-    \subsection*{Observations}
-    \begin{itemize}
-        \item I/O is the main bottle neck if the DBMS has to fetch data from disk
-        \item In-Memory DBMSs are more complicated
-        \item Compressing the database reduces DRAM requirements and processing
-        \item Key trade-off is \textbf{speed} vs \textbf{compression ratio}
-        \begin{itemize}
-            \item Every In-Memory DBMSs always choose speed
-        \end{itemize}
-    \end{itemize}
+There are key properties of real-world data sets that are amenable to compression:
+\begin{itemize}
+    \item
+    Data sets tend to have highly \textbf{skewed} distributions for attribute values.
+    
+    \item
+    Data sets tend to have high \textbf{correlation} between attributes of the same 
+    tuple.
+\end{itemize}
 
-    \subsection*{Real-World Data Characteristics}
-    \begin{itemize}
-        \item Data sets tend to have highly \textbf{skewed} distributions for attribute values
-        \item Data sets tend to have high \textbf{correlation} between attributes of the same tuple
-    \end{itemize}
+Given this, we want a database compression scheme to have the following properties:
+\begin{itemize}
+    \item
+    Must produce fixed-length values.
+    
+    \item
+    Allow the DBMS to postpone decompression as long as possible during query execution.
+    
+    \item
+    Must be a \textbf{lossless} scheme because people do not like losing data. 
+    Any kind of \textbf{lossy} compression has to be performed at the application level.
+\end{itemize}
+% 
+%     \subsection*{Zone Maps}
+%     \begin{itemize}
+%         \item Pre-computed aggregates for blocks of data
+%         \item DBMS can check the zone map first to decide whether it wants to access the block
+%     \end{itemize}
 
-    \subsection*{Goals for Database Compression}
-    \begin{itemize}
-        \item Must produce fixed-length values
-        \item Allow the DBMS to postpone decompression as long as possible during query execution
-        \item Must be a \textbf{lossless} scheme
-        \begin{itemize}
-            \item When a DBMS uses compression, it is always \textbf{lossless} because people don't like losing data
-            \item Any kind of \textbf{lossy} compression has to be performed at the application level
-            \item Some new DBMSs support approximate queries (\dbSys{BlinkDB, SnappyData, XDB, Oracle})
-        \end{itemize}
-    \end{itemize}
+%% ----------------------------------------------------
+%% Compression Granularity
+%% ----------------------------------------------------
+\subsection*{Compression Granularity}
+\begin{itemize}
+    \item \textbf{Block Level:}
+    Compress a block of tuples for the same table.
+    
+    \item \textbf{Tuple Level:}
+    Compress the contents of the entire tuple (NSM only).
+    
+    \item \textbf{Attribute Level:}
+    Compress a single attribute value within one tuple. This approach can target multiple attributes 
+    for the same tuple. It is possible to 
+    
+    \item \textbf{Columnar Level:}
+    Compress multiple values for one or more attributes stored for multiple tuples (DSM only).
+\end{itemize}
 
-    \subsection*{Zone Maps}
-    \begin{itemize}
-        \item Pre-computed aggregates for blocks of data
-        \item DBMS can check the zone map first to decide whether it wants to access the block
-    \end{itemize}
-
-    \subsection*{Compression Granularity}
-    \begin{itemize}
-        \item Block Level: Compress a block of tuples for the same table
-        \item Tuple Level: Compress the contents of the entire tuple (NSM only)
-        \item Attribute Level: Compress a single attribute value within one tuple. This approach can target multiple attributes for the same tuple
-        \item Compress multiple values for one or more attributes stored for multiple tuples (DSM only)
-    \end{itemize}
-
+%% ==================================================================
+%% NAIVE COMPRESSION
+%% ==================================================================
 \section{Naive Compression}
-\begin{itemize}
-    \item Compress data using a general purpose algorithm
-    \item Scope of compression is only based on the data provided as input
-\end{itemize}
-    \subsection*{Entropy Encoding}
-    \begin{itemize}
-        \item More common sequences use less bits to encode, less common sequences use more bits to encode
-    \end{itemize}
-    \subsection*{Dictionary Encoding}
-    \begin{itemize}
-        \item Build a data structure that maps data segments to an identifier. Replace those segments in the original data with a reference to the segments position in the dictionary data structure
-    \end{itemize}
+Compress data using a general purpose algorithm (e.g., gzip). Scope of compression is only 
+based on the data provided as input.
 
+The data \textbf{must} be decompressed first before it can be read and (potentially) 
+modified. This limits the scope of the compression scheme. These schemes also do not consider the 
+high-level meaning or semantics of the data
+
+There are two types of compression algorithms:
 \begin{itemize}
-    \item The data \textbf{must} be decompressed first before it can be read and (potentially) modified
-    \item This limits the scope of the compression scheme
-    \item These schemes also do not consider the high-level meaning or semantics of the data
+    \item \textbf{Entropy Encoding:}
+    More common sequences use less bits to encode, less common 
+    sequences use more bits to encode. \\
+    Example: Huffman Coding
+    
+    \item \textbf{Dictionary Encoding:}
+    Build a data structure that maps data segments to an identifier. Replace those 
+    segments in the original data with a reference to the segments position in the dictionary data 
+    structure. \\
+    Example: Most general purpose compression algorithms.
 \end{itemize}
 
+%% ==================================================================
+%% ENCODING SCHEMES
+%% ==================================================================
 \section{Encoding Schemes}
-
-    \subsection*{Run-Length Encoding~\cite{p31-roth}}
-    \begin{itemize}
-        \item Compress runs of the same value in a single column into triplets
-        \begin{itemize}
-            \item The value of the attribute
-            \item The start position in the column segment
-            \item The \# of elements in the run
-        \end{itemize}
-        \item Requires the columns to be sorted intelligently to maximize compression opportunitites
-    \end{itemize}
-
-    \subsection*{Bitmap Encoding~\cite{franklin14}}
-    \begin{itemize}
-        \item Store a separate Bitmap for each unqiue value for a particular attribute where an offset in the vector corresponds to a tuple
-        \item The $i^{th}$ position in the Bitmap corresponds to the $i^{th}$ tuple in the table
-        \item Typically segmented into chunks to avoid allocating large blocks of contiguous memory
-        \item Only practical if the value cardinality is low
-    \end{itemize}
-
-    \subsection*{Delta Encoding}
-    \begin{itemize}
-        \item Recording the difference between values that follow each other in the same column
-        \item The base value can be stored in-line or in a separate look-up table
-        \item Can be combined with RLE to get even better compression ratios
-    \end{itemize}
-
-    \subsection*{Incremental Encoding}
-    \begin{itemize}
-        \item Type of delta encoding whereby common prefixes or suffixes and their lengths are recorded so that they need not be duplicated
-        \item This works best with sorted data
-    \end{itemize}
-
-    \subsection*{Mostly Encoding}
-    \begin{itemize}
-        \item From \dbSys{Amazon Redshift}
-        \item When the values for an attribute are "mostly" less than the largest size, you can store them as a smaller data type
-        \item The remaining values that cannot be compressed are stored in their raw form in a separate space
-    \end{itemize}
+The alternative to a naive compression scheme is one where the DBMS encodes the database itself in 
+a compression format. The DBMS's query processing algorithms need to be aware of the data's 
+encoding scheme in order to decipher it.
 
 
-\section{Dictionary Compression ~\cite{p283-binnig}}
+%% ----------------------------------------------------
+%% Run-Length Encoding
+%% ----------------------------------------------------
+\subsection*{Run-Length Encoding}
+Compress runs of the same value in a single column into triplets~\cite{p31-roth}.
 \begin{itemize}
-    \item Replace frequent pattern with smaller codes
-    \item Most pervasive compression scheme in DBMSs
-    \item Needs to support fast encoding and decoding
-    \item Needs to also support range queries
+    \item The value of the attribute
+    \item The start position in the column segment
+    \item The \# of elements in the run
+\end{itemize}
+Requires the columns to be sorted intelligently to maximize compression opportunitites.
+
+%% ----------------------------------------------------
+%% Bitmap Encoding
+%% ----------------------------------------------------
+\subsection*{Bitmap Encoding}
+Store a separate Bitmap for each unqiue value for a particular attribute where an offset 
+in the vector corresponds to a tuple~\cite{franklin14}.
+\begin{itemize}
+    \item The $i^{th}$ position in the Bitmap corresponds to the $i^{th}$ tuple in the table
+    \item Typically segmented into chunks to avoid allocating large blocks of contiguous memory
+\end{itemize}
+Only practical if the value cardinality is low.
+
+%% ----------------------------------------------------
+%% Delta Encoding
+%% ----------------------------------------------------
+\subsection*{Delta Encoding}
+Record the difference between values that follow each other in the same column.
+The base value can be stored in-line or in a separate look-up table.
+Can be combined with RLE to get even better compression ratios.
+
+%% ----------------------------------------------------
+%% Incremental Encoding
+%% ----------------------------------------------------
+\subsection*{Incremental Encoding}
+Type of delta encoding whereby common prefixes or suffixes and their lengths are recorded 
+so that they need not be duplicated. This works best with sorted data.
+
+%% ----------------------------------------------------
+%% Mostly Encoding
+%% ----------------------------------------------------
+\subsection*{Mostly Encoding}
+When the values for an attribute are ``mostly'' less than the largest size, you can store 
+them as a smaller data type.
+The remaining values that cannot be compressed are stored in their raw form in a separate 
+space.
+From \dbSys{Amazon Redshift}.
+
+%% ==================================================================
+%% DICTIONARY COMPRESSION
+%% ==================================================================
+\section{Dictionary Compression}
+The most common database compression scheme is dictionary encoding~\cite{p283-binnig}.
+The DBMS replaces frequent pattern with smaller codes.
+A dictionary compression scheme needs to support fast encoding/decoding, as well as range queries.
+
+%% ----------------------------------------------------
+%% Dictionary Construction
+%% ----------------------------------------------------
+\subsection*{Dictionary Construction}
+
+\textbf{Approach \#1 -- All-at-Once:}
+\begin{itemize}
+    \item
+    Compute the dictionary for all the tuples at a given point of time.
+    
+    \item
+    New Tuples must use a separate dictionary or all the tuples must be recomputed.
 \end{itemize}
 
-    \subsection*{Dictionary Construction Approaches}
-        \subsubsection*{All at Once}
-        \begin{itemize}
-            \item Compute the dictionary for all the tuples at a given point of time
-            \item New Tuples must use a separate dictionary or all the tuples mus tbe recomputed
-        \end{itemize}
-        \subsubsection*{Incremental}
-        \begin{itemize}
-            \item Merge new tuples in with an existing dictionary
-            \item Likely requires re-encoding to existing tuples
-        \end{itemize}
+\textbf{Approach \#2 -- Incremental:}
+\begin{itemize}
+    \item
+    Merge new tuples in with an existing dictionary.
+    
+    \item
+    Likely requires re-encoding to existing tuples.
+\end{itemize}
 
-    \subsection*{Dictionary Scope Choices}
-        \subsubsection*{Lock Level}
-        \begin{itemize}
-            \item Only include a subset of tuples within a single table
-            \item Build dictionaries per block
-            \item Potentially lower compression ratio, but adding new tuples is easier
-        \end{itemize}
+%% ----------------------------------------------------
+%% Dictionary Scope
+%% ----------------------------------------------------
+\subsection*{Dictionary Scope}
 
-        \subsubsection*{Table Level}
-        \begin{itemize}
-            \item Construct a dictionary for the entire table
-            \item Better compression ratio, but expensive to update
-        \end{itemize}
+\textbf{Approach \#1 -- Lock Level}
+\begin{itemize}
+    \item
+    Only include a subset of tuples within a single table.
+    
+    \item
+    Build dictionaries per block.
+    
+    \item
+    Potentially lower compression ratio, but adding new tuples is easier.
+\end{itemize}
 
-        \subsubsection*{Multi-Table}
-        \begin{itemize}
-            \item Can be either subset or entire tables
-            \item Sometimes helps with joins and set operations
-        \end{itemize}
+\textbf{Approach \#2 -- Table Level}
+\begin{itemize}
+    \item
+    Construct a dictionary for the entire table.
+    
+    \item
+    Better compression ratio, but expensive to update.
+\end{itemize}
+
+\textbf{Approach \#3 -- Multi-Table}
+\begin{itemize}
+    \item
+    Can be either subset or entire tables.
+    
+    \item
+    Sometimes helps with joins and set operations.
+\end{itemize}
 
     \subsection*{Attribute Encoding}
     \begin{itemize}
