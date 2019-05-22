@@ -1,0 +1,282 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{08}
+\newcommand{\lecturename}{OLTP Indexes -- Part 1}
+\newcommand{\lecturedata}{2018-02-12}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% T-TREES
+%% ==================================================================
+\section{T-Trees}
+Order-preserving index Based on AVL Trees that is designed specifically for in-memory databases. 
+Instead of storing keys in nodes, store pointers to their original 
+values. Threads perform breath-first search ordering of keys.
+
+Proposed in 1986 from database researchers at University of Wisconsin--Madison~\cite{P294}.
+Used in \dbSys{TimesTen} and other early in-memory DBMSs developed 1990s. T-Trees are not used in 
+any new in-memory DBMS because they are not cache friendly.
+
+
+\textbf{Advantages:}
+\begin{itemize}
+    \item
+    Uses less memory because it does not store keys inside of each node.
+    
+    \item
+    Inner nodes contain key/value pairs (like B-Tree).
+\end{itemize}
+
+\textbf{Disadvantages}:
+\begin{itemize}
+    \item
+    Difficult to re-balance.
+    
+    \item
+    Difficult to implement safe concurrent access.
+    
+    \item
+    Have to chase pointers when scanning range or performing binary search inside of a node.
+\end{itemize}
+
+%% ==================================================================
+%% SKIP LIST
+%% ==================================================================
+\section{Skip List}
+Multiple levels of linked lists with extra pointers that \textbf{skip} over intermediate nodes. 
+Proposed by researchers at the University of Maryland--College Park in the 1990s~\cite{p668-pugh}.
+The index maintains keys in sorted order without requiring global re-balancing.
+
+A collection of lists at different levels:
+\begin{itemize}
+    \item
+    Lowest level is a sorted, singly linked-list of all keys.
+    
+    \item
+    2nd level links every other key.
+    
+    \item
+    3rd level links every fourth key.
+    
+    \item
+    In general, a level has half the keys of one below it.
+\end{itemize}
+    
+The key idea of a skip list is that it is a \textbf{probabilistic data structure}. To insert a new 
+key, flip a coin to decide how many levels to add the new key into. 
+Provides approximate O(log n) search times.
+
+\textbf{Advantages:}
+\begin{itemize}
+    \item
+    Uses less memory than a B+Tree (only if you do not include reverse pointers).
+    
+    \item
+    Insertions and deletions do not require re-balancing.
+\end{itemize}
+
+\textbf{Disadvantages:}
+\begin{itemize}
+    \item
+    Lots of random memory access (i.e., not cache friendly) because threads have to follow pointers 
+    when moving from one node to the next.
+    
+    \item
+    Does not support reverse range scans (i.e., backwards) because the linked-lists only point in 
+    one direction. Require extra effort to do this.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Concurrent Skip List
+%% ----------------------------------------------------
+\subsection*{Concurrent Skip List}
+It is possible to implement a concurrent skip list using only CaS 
+instructions~\cite{hpugh-concurrent-tr1990}. The data structure only support links in one direction 
+because CaS can only swap one location in memory (i.e., one pointer) atomically.
+If the DBMS invokes operation on the index, it can never ``fail''. A transaction can only abort due 
+to higher-level conflicts.
+
+\textbf{Insert:}
+\begin{itemize}
+    \item
+    For insert, CaS should happen \textbf{bottom up}.
+    
+    \item
+    If a CaS fails, then the index will retry until it succeeds.
+\end{itemize}
+
+\textbf{Delete:}
+\begin{itemize}
+    \item
+    First \textbf{logically} remove a key from the index by setting a flag to tell threads to 
+    ignore.
+    
+    \item
+    Then \textbf{physically} remove the key once we know that no other thread is holding the 
+    reference.
+    
+    \item Deletion should start from the top down to bottom.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Optimizations
+%% ----------------------------------------------------
+\subsection*{Optimizations}
+The skip list as described in most textbooks is inefficient~\cite{skiplists-done-right2016}.
+
+Potential Optimizations:
+\begin{itemize}
+    \item
+    Reducing \texttt{RAND()} invocations.
+    
+    \item
+    Reduce the number of random memory look-ups by packing multiple keys into a single node:
+    \begin{itemize}
+        \item \textbf{Insert Key:}
+        Find the node where it should go and look for a free slot. 
+        Perform CaS to store new key. If no slot is available, insert new node.
+        
+        \item \textbf{Search Key:}
+        Perform linear search on keys in each node.
+    \end{itemize}
+    
+    \item
+    Reverse iteration with a stack.
+    \begin{itemize}
+        \item
+        Perform a regular range query, but add the keys into a stack.
+        
+        \item
+        In the end, pop they keys from the stack, and they will pop in reverse order.
+    \end{itemize}
+    
+    \item
+    Reusing nodes with memory pools.
+\end{itemize}
+
+%% ==================================================================
+%% BW-TREE
+%% ==================================================================
+\section{Bw-Tree}
+Latch-free index designed by Microsoft Research for the Hekaton project~\cite{bwtree-icde2013}.
+
+Since CaS only updates a single address at a time, this limits the design of a data structure.
+Threads never need to set latches or block.
+
+\textbf{Key Idea \#1 -- Deltas:}
+\begin{itemize}
+    \item
+    No updates in place. This reduces cache invalidation.
+    
+    \item
+    Each update to a page produces a new delta.
+    
+    \item
+    Delta physically points to base page.
+    
+    \item
+    Install delta dress in physical address slot of mapping table using CaS.
+\end{itemize}
+
+\textbf{Key Idea \#2 -- Mapping Table:}
+\begin{itemize}
+    \item
+    Maps (logical) page IDs to their physical address locations in memory.
+    
+    \item
+    Nodes only store page IDs. Threads check the mapping table to find out where in memory 
+    they need to go to when traversing the tree.
+
+    \item
+    Allows for CaS of physical locations of pages.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Operations
+%% ----------------------------------------------------
+\subsection*{Operations}
+
+\textbf{Update:}
+\begin{itemize}
+    \item
+    Each update to a new page produces a new delta.
+    
+    \item
+    Delta physically points to base page.
+    
+    \item
+    Install delta address in physical address slot of mapping table using CaS.
+    
+    \item
+    Threads may try to install updates to same state of the page.
+    Winner thread succeeds, any loser thread must retry their operation.
+\end{itemize}
+
+\textbf{Search:}
+\begin{itemize}
+    \item
+    Traverse tree like regular B+tree.
+    
+    \item
+    If mapping table points to delta chain, stop at first occurrence of search key.
+    
+    \item
+    Otherwise, perform binary search on base page.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Delta Records
+%% ----------------------------------------------------
+\subsection*{Delta Records}
+\begin{itemize}
+    \item \textbf{Record Update Deltas:}
+    Insert/update/deletes
+    
+    \item \textbf{Structure Modification Deltas:}
+    Split/Merge information
+    
+    \item \textbf{Consolidation:}
+    \begin{itemize}
+        \item
+        Consolidate updates by creating new page with deltas applied.
+        
+        \item
+        CaS-ing the mapping table address ensures no deltas are missed.
+    \end{itemize}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Garbage Collection
+%% ----------------------------------------------------
+\subsection*{Garbage Collection}
+The Bw-Tree uses an epoch-based garbage collection scheme. Also called RCU in Linux.
+
+\begin{itemize}
+    \item
+    All operations are tagged with an \textbf{epoch}.
+    
+    \item
+    Each epoch tracks the threads that are part of it and the objects that can be reclaimed.
+    
+    \item
+    Thread joins an epoch prior to each operation and post objects that can be reclaimed for 
+    the current epoch (not necessarily the one it joined).
+    
+    \item
+    Garbage for an epoch is reclaimed only when all threads have exited the epoch.
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{08-oltpindexes1}
+
+\end{document}

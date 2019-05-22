@@ -1,0 +1,202 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{01}
+\newcommand{\lecturename}{In-Memory Databases}
+\newcommand{\lecturedata}{2019-01-14}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% BACKGROUND
+%% ==================================================================
+\section{Background}
+The history of DBMSs development is about dealing with the limitations of hardware.
+The first DBMSs in the 1970s were designed in environment with the following characteristics:
+\begin{itemize}
+    \item Uniprocessor (single core CPU)
+    \item RAM was severely limited
+    \item Database had to be stored on disk
+    \item Disk is slow. \textbf{Seriously slow}
+\end{itemize}
+   
+But now DRAM capacities are large enough that most structured databases will entirely fit in memory.
+This merits us to rethink all aspects of the DBMS to account for this. This course is about ways to 
+do this.
+
+%% ==================================================================
+%% DISK-ORIENTED DATABASE MANAGEMENT SYSTEMS
+%% ==================================================================
+\section{Disk-Oriented Database Management Systems}
+For a disk oriented DBMS, the system architecture is predicated on the assumption that data 
+is stored in non-volatile memory. This means that the DBMS may have to read data from disk during 
+query execution.
+
+In a disk-based system, only approximately 7\% of instructions are done on actual 
+work~\cite{harizopoulos08}. The majority of the DBMS's instructions time are in managing 
+three of its key components: (1) buffer pool, (2) concurrency control, (3) logging/recovery.
+
+%% ----------------------------------------------------
+%% Buffer Pool
+%% ----------------------------------------------------
+\subsection*{Buffer Pool}
+The DBMS organizes the database as a set of fixed-length blocks called \textit{slotted pages}.
+The system uses an in-memory (volatile) \textit{buffer pool} to cache the blocks cached from disk.
+
+\begin{itemize}
+    \item
+    When a query accesses a page, the DBMS checks to see if that page is already in memory.
+        
+    \item
+    If not, the DBMS retrieves the memory from disk and copies it into a frame in its 
+    buffer pool.
+        
+    \item
+    Once the page is in memory, the DBMS translates any on-disk addresses to their 
+    in-memory addresses.
+        
+    \item
+    Every tuple access has to go through the buffer pool manager regardless of whether 
+    that data will always be in memory.
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Concurrency Control
+%% ----------------------------------------------------
+\subsection*{Concurrency Control}
+In a disk oriented DBMS, the system assumes that a transaction could stall at any time when 
+it tries to access data that is not in memory.
+        
+The system's concurrency control protocol allows the DBMS to execute other transactions at 
+the same time to improve performance while still preserving atomicity and isolation 
+guarantees.
+        
+%         \item Locks are stored in separate data structure to avoid being swapped to disk
+%         \item Lock~\cite{a16-graefe}
+%         \begin{itemize}
+%             \item Protects the database logical contents from other txns
+%             \item Held for txn duration
+%             \item Need to be able to rollback changes
+%         \end{itemize}
+%         \item Latch~\cite{a16-graefe}
+%         \begin{itemize}
+%             \item Protects the critical sections of the DBMS internal data structure from other threads
+%             \item Held for operation duration
+%             \item Does not need to be able to rollback changes
+%         \end{itemize}
+
+%% ----------------------------------------------------
+%% Logging and Recovery
+%% ----------------------------------------------------
+\subsection*{Logging and Recovery}
+Most DBMS use \texttt{STEAL} + \texttt{NO-FORCE} buffer pool policies so all modifications 
+have to be flushed to the WAL before a transaction can commit~\cite{franklin14}.
+Log entries contain before and after image of record modified.
+
+
+%% ==================================================================
+%% IN-MEMORY DATABASE MANAGEMENT SYSTEMS
+%% ==================================================================
+\section{In-Memory Database Management Systems}
+The system architecture assumes that the primary storage location of the database is in 
+memory. This means that the DBMS does not need to perform extra steps during execution to 
+handle the case where it has to retrieve data from disk.
+If disk I/O is no longer the slowest resource, much of the DBMS architecture will have to 
+change to account for other bottlenecks:~\cite{stonebraker2007}
+\begin{itemize}
+    \item Locking/latching
+    \item Cache-line misses
+    \item Pointer chasing
+    \item Predicate evaluation
+    \item Data movement and copying
+    \item Networking (between application and DBMS)
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Data Organization
+%% ----------------------------------------------------
+\subsection*{Data Organization}
+An in-memory DBMS splits the data for tuples into fixed-length and variable-length pools. Indexes 
+use pointers to the fixed-length data for each tuple. These tuples then have 64-bit pointers to any 
+variable-length values stored in a separate memory location.
+    
+%% ----------------------------------------------------
+%% Concurrency Control
+%% ----------------------------------------------------
+\subsection*{Concurrency Control}
+In-memory DBMSs still use either a pessimistic or optimistic concurrency control 
+schemes to interleave transactions. They will use modern variants of these algorithms that are 
+designed for in-memory data storage.
+The new bottleneck is contention caused from transactions trying to access data at the 
+same time.
+
+One key difference is that an in-memory DBMS can store locking information about each tuple 
+together with its data. This is because the cost of a transaction acquiring a lock is 
+the same as accessing data. Contrast this with disk-oriented DBMSs where locks are physically 
+stored separate from their tuples because the tuples may get swapped out to disk.
+
+%% ----------------------------------------------------
+%% Indexes
+%% ----------------------------------------------------
+\subsection*{Indexes}
+Like with concurrency control schemes, in-memory DBMSs will use data structures for their indexes 
+that are optimized for fast, in-memory access.
+
+In-memory DBMSs will not log index updates. Instead, the system will rebuild the indexes upon 
+restart when it loads the database back into memory. This avoids the runtime overhead of 
+logging updates to indexes during transaction execution.
+    
+%% ----------------------------------------------------
+%% Query Processing
+%% ----------------------------------------------------
+\subsection*{Query Processing}
+The best strategy for executing a query plan in a DBMS changes when all the data is 
+already in memory. Sequential scans are no longer significantly faster than random access.
+        
+The traditional tuple-at-a-time iterator model is too slow because of function calls.
+    
+%% ----------------------------------------------------
+%% Logging and Recovery
+%% ----------------------------------------------------
+\subsection*{Logging and Recovery}
+The DBMS still needs WAL on non-volatile storage since the system could halt at anytime.
+In many cases, however, it may be possible to use more lightweight logging schemes (e.g., only 
+store 
+redo information). For example, since there are no ``dirty pages'', the DBMS does not need to 
+maintain LSNs throughout the systems.
+%         
+In-memory DBMSs still takes checkpoints to reduce the amount of log that the system has to replay 
+during recovery.
+    
+ 
+%% ==================================================================
+%% NOTABLE EARLY IN-MEMORY DBMSS
+%% ==================================================================
+\section{Notable Early In-memory DBMSs}
+\begin{itemize}
+    \item \dbSys{TimesTen}:
+    Originally Smallbase~\cite{heytens95} from HP Labs.
+    Multi-process, shared memory DBMS.
+    Bought by Oracle in 2005~\cite{lahiri13}.
+
+    \item \dbSys{Dali}:
+    Multi-process shared memory storage manager using memory mapped files~\cite{jagadish94}.
+        
+    \dbSys{P*TIME}:
+    Korean in-memory DBMS from the 2000s~\cite{cha04}.
+    Lots of interesting features (e.g., hybrid storage layouts, support for larger-than-memory 
+    databases). Sold to SAP in 2005 and is now part of HANA.
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{01-inmemory}
+
+\end{document}
