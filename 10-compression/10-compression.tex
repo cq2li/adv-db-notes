@@ -1,0 +1,204 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{10}
+\newcommand{\lecturename}{Database Compression}
+\newcommand{\lecturedata}{2018-02-21}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% DATABASE COMPRESSION
+%% ==================================================================
+\section{Database Compression}
+Compression is widely used in disk-based DBMSs. Because disk I/O is (almost) always the main bottleneck. Thus, compression in these systems improve performance, especially in read-only analytical workloads. The DBMS can fetch more useful tuples if they have been compressed beforehand at the cost of greater computational overhead for compression and decompression.
+
+In-memory DBMSs more complicated since they do not have to fetch data from disk to execute a query. Memory is much faster than disks, but compressing the database reduces DRAM requirements and processing. They have to strike a balance between \textbf{speed} vs. \textbf{compression ratio}, and most systems choose to favor speed.
+
+If data sets are completely random bits, there would be no ways to perform compression. However, there are key properties of real-world data sets that are amenable to compression:
+\begin{itemize}
+    \item
+    Data sets tend to have highly \textit{skewed} distributions for attribute values (e.g., Zipfian distribution of the Brown Corpus).
+    
+    \item
+    Data sets tend to have high \textit{correlation} between attributes of the same 
+    tuple (e.g., Zip Code to City, Order Date to Ship Date).
+\end{itemize}
+
+Given this, we want a database compression scheme to have the following properties:
+\begin{itemize}
+    \item
+    Must produce fixed-length values. The only exception is var-length data stored in separate pools. This because the DBMS should follow word-alignment and be able to access data using offsets.
+    
+    \item
+    Allow the DBMS to postpone decompression as long as possible during query execution (late materialization). Constantly compressing / decompressing large chunks of data is a waste of CPU resources.
+    
+    \item
+    Must be a \textbf{lossless} scheme because people do not like losing data. 
+    Any kind of \textbf{lossy} compression has to be performed at the application level.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Data Skipping
+%% ----------------------------------------------------
+\subsection*{Data Skipping}
+Another way to interpret compression is simply reading less data. The DBMS can just read part of the entire data set during query execution. Data Skipping is an orthogonal approach to compression; the DBMS can use both techniques. There are two ways of doing data skipping:
+\begin{itemize}
+    \item \textbf{Approximate Queries (Lossy):} Execute queries on a sampled subset of the entire table to produce approximate results. Examples: BlinkDB, SnappyData, XDB, Oracle (2017).
+    \item \textbf{Zone Maps (Loseless):} Generate pre-computed aggregates for blocks of data. The DBMS can check the zone map first to decide whether it wants to access the block. Examples: Oracle, Vertica, MemSQL, Netezza.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Compression Granularity
+%% ----------------------------------------------------
+\subsection*{Compression Granularity}
+Before adding compression to the DBMS, we need to decide what kind of data we want to compress. This decision determines compression schemes are available. There are four levels of compression granularity:
+\begin{itemize}
+    \item \textbf{Block Level:}
+    Compress a block of tuples for the same table.
+    
+    \item \textbf{Tuple Level:}
+    Compress the contents of the entire tuple (NSM only).
+    
+    \item \textbf{Attribute Level:}
+    Compress a single attribute value within one tuple.
+    
+    \item \textbf{Columnar Level:}
+    Compress multiple values for one or more attributes stored for multiple tuples (DSM only). This allows for more complicated compression schemes.
+\end{itemize}
+
+%% ==================================================================
+%% NAIVE COMPRESSION
+%% ==================================================================
+\section{Naive Compression}
+The DBMS compresses data using a general purpose algorithm (e.g., gzip, LZO, LZ4, Snappy, Brotli, Oracle OZIP, Zstd). Although there are several compression algorithms that the DBMS could use, engineers often choose ones that often provides higher speed rather than compression ratio for in-memory DBMSs. The scope of compression is only based on the data provided as input.
+
+An example of using naive compression is in \textbf{MySQL InnoDB}. The DBMS compresses disk pages, pad them to a power of two KBs and stored them into the buffer pool. However, every time the DBMS tries to read data, the compressed data in the buffer pool has to be decompressed.
+
+Since accessing data requires decompression of compressed data, this limits the scope of the compression scheme. If the goal is to compress the entire table into one giant block, using naive compression schemes would be impossible since the whole table needs to be compressed/decompressed for every access. Therefore, for MySQL, it breaks the table into smaller chunks since the compression scope is limited. 
+
+Another problem is that these naive schemes also do not consider the high-level meaning or semantics of the data. The algorithm is oblivious to neither the structure of the data, nor how the query is planning to access the data. Therefore, this gives away the opportunity to utilize late materialization, since the DBMS will not be able to tell when it will be able to delay the decompression of data.
+
+\section{Columnar Compression}
+If the DBMS is aware of how the data is compressed and the objective of the query, the DMBS can take advantage of that and compress not only the data, but also the query itself. As a result, we can perform exact-match comparisons and natural joins on compressed data if predicates and
+data are compressed the same way.
+For OLAP queries, if the DBMS assumes a columnar structure and has no major updates, it can adopt the following seven encoding schemes:
+
+%% ----------------------------------------------------
+%% Null Suppression
+%% ----------------------------------------------------
+\subsection*{Null Suppression}
+If the values in the data are sparse, consecutive zeros or blanks in the data are replaced with a description of how many there were and where they existed. This makes Null Suppression useful in wide tables with sparse data.
+
+An example of this is Oracle’s \textbf{Byte-Aligned Bitmap Codes (BBC)}. It is also considered a form of Run-Length Encoding, which will be discussed in the following section.
+
+%% ----------------------------------------------------
+%% Run-Length Encoding (ELE)
+%% ----------------------------------------------------
+\subsection*{Run-Length Encoding (RLE)}
+Null Suppression can be considered a special case of RLE. RLE compresses runs of the same value in a single column into triplets~\cite{p31-roth}:
+\begin{itemize}
+    \item The value of the attribute
+    \item The start position in the column segment
+    \item The number of elements in the run
+\end{itemize}
+The DBMS should sort the columns intelligently beforehand to maximize compression opportunities. This clusters duplicate attributes and thereby increasing compression ratio.
+
+%% ----------------------------------------------------
+%% Bitmap Encoding
+%% ----------------------------------------------------
+\subsection*{Bitmap Encoding}
+The DBMS stores a separate bitmap for each unique value for a particular attribute where an offset in the vector corresponds to a tuple~\cite{franklin14}. The $i^{th}$ position in the bitmap corresponds to the $i^{th}$ tuple in the table to indicate whether that value is present or not. The bitmap is typically segmented into chunks to avoid allocating large blocks of contiguous memory.
+
+This approach is only practical if the value cardinality is low, since the size of the bitmap is linear to the cardinality of the attribute value. If the cardinalty of the value is high, then the bitmaps can become larger than the original data set.
+
+It is also possible to compress the bitmaps themselves. One approach is to use a naive compression algorithm (e.g., LZ4, Snappy). The downside, however, is that accessing the bitmap has to trigger the decompression process and there is no way to jump around the compressed data using offsets. 
+
+Another approach to compressing the bitmaps is to use byte-aligned bitmap codes. This uses run-length encoding on bitmaps, which can in turn provide ways to navigate through compressed data using offsets. An example of this is \textbf{Oracle Byte-Aligned Bitmap Codes (BBC)}. It divides bitmap into chunks that contain different categories of bytes:
+\begin{itemize}
+    \item Gap Byte: All the bits are 0s. Compressed with RLE.
+    \item Tail Byte: Some bits are 1s. Stored uncompressed unless it consists of only 1-byte or has only one non-zero bit.
+\end{itemize}
+Each chunk is encoded in a way that consists of some Gap Bytes followed by some Tail Bytes. 
+
+This method provides good compression ratio, but it is slower due to excessive branching in the program logic. If the CPU incorrectly predicts branches, it would pay a big penalty for flushing out the instruction pipeline and refetch the things that should have been exectued. BBC also does not provide random access. If the DBMS wants to check if a value is present, it has to start from the beginning and decompress the whole thing. Therefore, BBC is an obsolete format and has been replaced with \textbf{Word-Aligned Hybrid(WAH)}, a patented variation on the BBC that provides better performance.
+
+%% ----------------------------------------------------
+%% Delta Encoding
+%% ----------------------------------------------------
+\subsection*{Delta Encoding}
+Instead of storing exact values, record the difference between values that follow each other in the same column. The base value can be stored in-line or in a separate look-up table. We can also use RLE on the stored deltas to get even better compression ratios.
+
+%% ----------------------------------------------------
+%% Incremental Encoding
+%% ----------------------------------------------------
+\subsection*{Incremental Encoding}
+This is a type of delta encoding whereby common prefixes or suffixes and their lengths are recorded so that they need not be duplicated. This works best with sorted data since the incremental deltas are typically small. This compression scheme works bad for OLTP since the DBMS needs to start from the beginning to reconstruct the original string.
+
+%% ----------------------------------------------------
+%% Mostly Encoding
+%% ----------------------------------------------------
+\subsection*{Mostly Encoding}
+When the values for an attribute are ``mostly'' less than the largest size, the DBMS can store them as a smaller data type. The remaining values that cannot be compressed are stored in their raw form in a separate space. This approach is used in \dbSys{Amazon Redshift}.
+
+%% ----------------------------------------------------
+%% Dictionary Compression
+%% ----------------------------------------------------
+\subsection*{Dictionary Compression}
+The most common database compression scheme is dictionary encoding~\cite{p283-binnig}.
+The DBMS replaces frequent patterns in values with smaller codes. It then stores only these codes and a data structure (i.e., dictionary) that maps these codes to their original value.
+A dictionary compression scheme needs to support fast encoding/decoding, as well as range queries.
+
+\textbf{Dictionary Construction:} The first step is to decide when the DBMS should construct the dictionary. There are two approaches:
+\begin{itemize}
+    \item \textbf{All-at-Once:} Compute the dictionary for all the tuples at a given point of time. New Tuples must use a separate dictionary or all the tuples must be recomputed.
+    \item \textbf{Incremental:} Merge new tuples in with an existing dictionary. If the encoding list is order preserving, the DBMS needs to make sure the new code fits into the right location. This likely requires re-encoding to existing tuples. 
+\end{itemize}
+
+\textbf{Dictionary Scope:} Next step is to decide the scope of the dictionary. We want to know how much data we would be looking at when we are building the dictionary. There are three levels in total:
+\begin{itemize}
+    \item \textbf{Block Level:} The most common approach is to only include a subset of tuples within a single table and build dictionaries per block. The advantage is that every time a new block is added, all other compressed blocks are unchanged. The downside is that this results in potentially a lower compression ratio because the amount of redundant data within one block will be much less than the amount of the data within the entire table itself.
+    \item \textbf{Table Level:} Construct a dictionary for the entire table. This provides better compression ratio since there is more redundant data, but expensive to update to maintain ordering.
+    \item \textbf{Multi-Table:} The dictionary scope can also be either a subset of tables or entire tables. This sometimes helps with joins and set operations. For example, if two tables are connected via a foreign key and if the columns in both tables use the same dictionary, then the DBMS does not have to re-encode the values when it joins those tables together.
+\end{itemize}
+
+\textbf{Encoding and Decoding:} Finally, the dictionary needs to decide how to \textbf{encodes} (convert uncompressed value into its compressed form)/\textbf{decodes} (convert compressed value back into its original form) data. It is not possible to use hash functions.
+
+The encoded values also need to support sorting in the same order as original values. This ensures that results returned for compressed queries run on compressed data are consistent with uncompressed queries run on original data. This order-preserving property allows operations to be performed directly on the codes.
+
+\textbf{Dictionary Implementations:} There are several approaches to represent a dictionary:
+\begin{itemize}
+    \item \textbf{Array:} One array of original values and another array with pointers that maps to string offsets. This is expensive to update; to preserve the ordering of dictionary after inserting a new tuple, the DBMS needs to update pointer offsets and dictionary codes.
+    \item \textbf{Hash Table:} Fast and compact compared to the array approach since updates are easier. However, the hash table is unable to support range and prefix queries because there is no easy access to the actual values stored in the dictionary.
+    \item \textbf{Shared-leaves B+Tree:} Use two B+Trees. The two B+Trees will go in opposite directions: one for encoding, the other for decoding. In the middle layer, they share the leaf nodes that allow encoding and decoding in both directions to minimize the amount of redundant data~\cite{p283-binnig}. This approach is slower than a hash table and takes more memory, but supports range and prefix queries.
+\end{itemize}
+
+%% ==================================================================
+%% OLTP Indexes
+%% ==================================================================
+\section{OLTP Indexes}
+An OLTP DBMS cannot use the OLAP compression techniques because it needs to support fast random tuple access. Compressing and decompressing “hot” tuples on-the-fly
+would be too slow to do during a transaction. 
+
+Most queries in OLTP applications access the database using indexes. Thus, OLTP applications build many indexes for their tables. These indexes consume a large portion of the memory for an OLTP database. However, none of the compression schemes mentioned earlier are designed for indexes.
+
+\subsection*{Hybrid Indexes}
+Hybrid Indexes~\cite{Zhang} introduces a technique to compress database indexes. It split a single logical index into two physical indexes. Data is migrated from one stage index to the next index over time. The two stages are:
+\begin{itemize}
+    \item \textbf{Dynamic Stage:} Stores uncompressed new data. Data in this stage is fast to access and update.
+    \item \textbf{Static Stage:} Stores compressed old data. Data in this stage is read-only. Static stage uses a compact B+Tree structure that has empty slots removed and reduces pointers to offsets, storing leaf nodes in a giant array.
+\end{itemize}
+All updates go to dynamic stage; reads pass through a bloom filter (a compact probabilistic data structure that might generate false positives) that directs the DBMS to either stage.
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{10-compression}
+
+\end{document}

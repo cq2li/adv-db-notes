@@ -1,0 +1,154 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{05}
+\newcommand{\lecturename}{Multi-Version Concurrency Control (Garbage Collection)}
+\newcommand{\lecturedata}{2019-02-31}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% INTRODUCTION
+%% ==================================================================
+\section{Introduction}
+MVCC maintains multiple physical versions of a single logical object in the database. Over time, old versions will be invisible from active transactions under \isoLevel{Snapshot Isolation}. These are \textit{reclaimable} versions that need to be removed by the DBMS.
+
+Up until now, we have assumed that transactions (OLTP) will complete in a short amount of time. This means that the lifetime of an obsolete version is short as well.
+
+But HTAP workloads may have long running queries that access old snapshots. Such queries block the previous garbage collection methods (tuple-level, transaction-level) that we have discussed. Problems arise with old versions that we are not able to clean up:
+\begin{itemize}
+    \item Increased Memory Usage
+    \item Memory Allocation Contention
+    \item Longer Version Chains
+    \item Garbage Collection CPU Spikes
+    \item Poor Time-based Version Locality
+\end{itemize}
+
+%% ----------------------------------------------------
+%% MVCC Deletes
+%% ----------------------------------------------------
+\subsection*{MVCC Deletes}
+When we perform a delete operation, we want the tuple to be logically removed, but not physically. This needs to be distinguished from old versions that should be included in garbage collection.
+
+The DBMS \textit{physically} deletes a tuple from the database only when all versions of a logically deleted tuple are not visible. We need a way to denote that a tuple has been logically deleted at some point in time.
+
+\textbf{\# 1 - Deleted Flag:} Maintain a flag to indicate that the logical tuple has been deleted after the newest physical version. It can either be in tuple header or a separate column. Usually the preferred way for implementation.
+
+\textbf{\# 2 - Tombstone Flag:}
+Create an empty physical version to indicate that a logical tuple is deleted. To reduce the storage overhead, use a separate pool for tombstone tuples  with only a special bit pattern in version chain pointer.
+
+%% ==================================================================
+%% Indexes with MVCC Tables
+%% ==================================================================
+\subsection*{Indexes with MVCC Tables}
+Most MVCC DBMS indexes do not store version information about tuples with their keys. An exception is index-organized tables like MySQL.
+
+Every index must support duplicate keys from different snapshots because the same key may point to different logical tuples in
+different snapshots. Therefore, the DBMS need to use additional execution logic to perform conditional inserts for primary key / unique indexes. These conditional inserts need to be atomic as well. The DBMS's execution engine also may get back multiple entries for a single
+fetch; it then has to follow the pointers to find the proper physical version.
+
+%% ==================================================================
+%% GC: Designs
+%% ==================================================================
+\section{Garbage Collection: Designs}
+There are four issues we need to keep in mind when designing garbage collection for the DBMS~\cite{jlee2016sap}.
+
+%% ==================================================================
+%% Index-Cleanup
+%% ==================================================================
+\subsection*{Index Clean-up}
+The DBMS must remove a tuples' keys from
+indexes when their corresponding versions are no longer visible to active txns. To achieve this, the DBMS needs to maintain an internal log entry that can track the txn's modifications to individual indexes to support GC of older versions on commit and removal modifications on abort.
+
+% ==================================================================
+% Version Tracking
+% ==================================================================
+\subsection*{Version Tracking}
+There are two approaches to keep track of versions:
+\begin{itemize}
+    \item \textbf{Tuple-level}: Find old versions by examining tuples directly. We use either \textit{Background Vacuuming} or \textit{Cooperative Cleaning} to locate old tuples.
+    \item \textbf{Transaction-level}: Txns keep track of their old versions so the DBMS does not have to scan tuples to determine visibility. This method is used by SAP HANA.
+\end{itemize}
+
+% ==================================================================
+% Granularity
+% ==================================================================
+\subsection*{Granularity}
+Granularity determines how the DBMS should internally organize the expired versions that it needs to check to determine whether they are reclaimable. Different granularity levels balance trade-off between the ability to reclaim versions sooner versus computational overhead.
+\begin{itemize}
+    \item \textbf{Single Version:} Track the visibility of individual versions and reclaim them separately. This approach provides high-grained control, but has higher overhead.
+    \item \textbf{Group Version:} Organize versions into groups and reclaim all of them together. This reduces overhead, but may delay reclamation. This approach has less overhead, but may delay reclamation.
+    \item \textbf{Tables:} Reclaim all versions from a table if the DBMS determines that active txns will never access it. Need to account for special case for stored procedures and prepared statements since it requires the DBMS knowing what tables a txn will access in advance.
+
+\end{itemize}
+
+% ==================================================================
+% Comparison Unit
+% ==================================================================
+\subsection*{Comparison Unit}
+DBMS needs a way to determine whether version(s) are reclaimable. Examining the list of active txns and reclaimable versions should be latch-free; we want this process to be as efficient as possible to prevent new transactions from committing. As a result, the reclaimable checks might generate false negatives, but this is okay.
+\begin{itemize}
+    \item \textbf{\# 1 - Timestamp:} Use a global minimum timestamp to determine whether versions are safe to reclaim. This approach is the easiest to implement and execute.
+    \item \textbf{\# 2 - Interval:}
+    Introduced by SAP HANA. Excise timestamp ranges that are not visible. More difficult to identify ranges. 
+\end{itemize}
+% ==================================================================
+% BLOCK COMPACTION
+% ==================================================================
+\section{Block Compaction}
+If the application deletes a tuple, then the slots occupied by that tuple's versions become available. The DBMS should try to reuse those slots to conserve space. It should always try to reuse variable-length data slots because (?), and sometimes fixed-length slots. The DBMS also need to deal with the case where the application deletes a bunch of tuples in a short amount of time, which in turn generates a large amount of potentially reusable space.
+% ==================================================================
+% MVCC Deleted Tuples
+% ==================================================================
+\subsection*{MVCC Deleted Tuples}
+The DBMS needs to figure out what to deal with empty slots after tuples have been deleted.
+\begin{itemize}
+    \item \textbf{\# 1 - Reuse Slot}
+\begin{itemize}
+    \item Allow workers to insert new tuples in the empty slots.
+    \item Obvious choice for append-only storage since there is no distinction between versions.
+    \item Destroys temporal locality of tuples in delta storage.
+\end{itemize}
+    \item \textbf{\# 2 - Leave Slot Unoccupied}
+    \begin{itemize}
+        \item Workers can only insert new tuples in slots that were not previously occupied.
+        \item Ensures that tuples in the same block were inserted into the database at around the same time.
+        \item Need an extra mechanism to fill holes.
+    \end{itemize}
+    \end{itemize}
+% ==================================================================
+% BLOCK COMPACTION
+% ==================================================================
+\subsection*{Block Compaction}
+A mechanism to reuse empty holes in our database is to consolidate less-than-full blocks into fewer blocks and then returning memory to the OS. The DBMS should move data using \sql{DELETE}+ \sql{INSERT} to ensure
+transactional guarantees during consolidation.
+
+Ideally the DBMS will want to store tuples that are likely to be accessed together within a window of time together in the same block. This will make operations on blocks (e.g., compression) easier to execute because tuples that are unlikely to be updated will be within the same block.
+% ==================================================================
+% BLOCK COMPACTION Targets
+% ==================================================================
+\subsection*{Block Compaction Targets}
+\begin{enumerate}
+    \item \textbf{Time Since Last Update:} Leverage the \sql{BEGIN-TS} in each tuple
+    \item \textbf{Time Since Last Access:} Expensive to maintain unless tuple has \sql{READ-TS}.
+    \item \textbf{Application-level Semantics:} Tuples from the same table that are related to each other according to some higher-level construct. Difficult for the DBMS to figure out automatically.
+\end{enumerate}
+% ==================================================================
+% Truncate Operation
+% ==================================================================
+\subsection*{Truncate Operation}
+During block compaction process, the DBMS might want to free up large amount of space with small overhead. \sql{TRUNCATE} removes all tuples in a table, which is the same as \sql{DELETE} without a \sql{WHERE} clause. 
+
+The fastest way to execute \sql{TRUNCATE} is to drop the table and then create it again. This invalidates all versions within that table. We would not need to track the visibility of individual tuples. The GC will free all memory when there are no active txns that exist before the drop operation. If the catalog is transnational, then this is easy to do since all the operations on metadata are atomic.
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{05-mvcc3}
+
+\end{document}

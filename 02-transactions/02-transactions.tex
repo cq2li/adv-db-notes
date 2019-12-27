@@ -3,8 +3,10 @@
 \newcommand{\lecturenumber}{02}
 \newcommand{\lecturename}{Transaction Models \& Concurrency Control}
 \newcommand{\lecturedata}{2019-01-16}
+\newcommand{\rr}[1]{\textcolor{red}{#1}}
 
 \usepackage{../dbnotes}
+\usepackage{xcolor}
 
 \begin{document}
 
@@ -31,6 +33,8 @@
     \item \textbf{Hybrid Transaction + Analytical Processing (HTAP):}
     OLTP + OLAP together on the same database instance.
 \end{itemize}
+\rr{\subsection*{Bifurcated Environment}
+Transactions are executed on frontend OLTP silos, but we want to perform complex analytical queries. To avoid overloading our frontend, we use \textit{Extract Transform Load} to transform data across silos into uniform format to prepare for analytical queries on the backend.}
 
 %% ----------------------------------------------------
 %% Transactions
@@ -71,10 +75,13 @@ completed with either \sql{COMMIT} or \sql{ROLLBACK}.
 This is what most people think of when discussing transaction support in a DBMS.
 
 There are several limitations to flat transactions that motivate us to consider other models.
-Foremost is that the application can only rollback the entire transaction (i.e., no partial 
-rollbacks).
-All of a transaction's work is lost is the DBMS fails before that transaction finishes. Each 
+\begin{enumerate}
+    \item Foremost is that the application can only rollback the entire transaction (i.e., no partial 
+rollbacks). \rr{In the case of multi-stage planning, like making reservations for tickets for flying from Pittsburgh to Florence. Either all the reservations need to occur or none of them. Without partial rollback, DBMS cannot perform multi-stage operations.}
+    \item All of a transaction's work is lost i\rr{f} the DBMS fails before that transaction finishes. \rr{In the case of bulk updates, if DBMS fails then we would waste all of our work.}
+    \item Each 
 transaction takes place at a single point in time.
+\end{enumerate}
 
 
 %% ----------------------------------------------------
@@ -88,6 +95,8 @@ The application can control the state of the transaction through these savepoint
 can create a handle with the \sql{SAVEPOINT} command during a transaction. It can use \sql{ROLLBACK} 
 to revert all changes back to the state of the database at a given savepoint. It can also use 
 \sql{RELEASE} to destroy a savepoint previously defined in the transaction.
+
+\rr{\sql{SAVEPOINT}s are linked to each other. If we release a certain \sql{SAVEPOINT}, all following \sql{SAVEPOINT}s are destroyed.}
     
 %% ----------------------------------------------------
 %% Nested Transaction
@@ -95,7 +104,7 @@ to revert all changes back to the state of the database at a given savepoint. It
 \subsection*{Nested Transactions}
 The invocation of a transaction during the execution of another transaction. The nested transactions 
 form a hierarchy of work. The outcome of a child transaction depends on the outcome of its parent 
-transaction.
+transaction \rr{(e.g., A rollback of parent transaction also undos all its child transactions.). }
 
 %% ----------------------------------------------------
 %% Chained Transactions
@@ -105,13 +114,15 @@ The ability to link multiple transactions one after each other.
 The combined \sql{COMMIT} and \sql{BEGIN} operations between two transactions is atomic. This means 
 that no other transaction can change the state of the database as seen by the second transaction 
 from the time that the first transaction commits and the second transaction begins.
+
+\rr{In comparison to transaction savepoints, chained transactions allow DBMS to free locks and forbid rollback to transactions that appeared earlier in the chain.}
     
 %% ----------------------------------------------------
 %% Compensating Transactions
 %% ----------------------------------------------------
 \subsection*{Compensating Transactions}
 A special type of transaction that is designed to semantically \textit{reverse} the effects of 
-another already committed transaction. Such a reversal has to be logical instead of physical.
+another already committed transaction. Such a reversal has to be logical instead of physical. \rr{Physical reversals depend on logging outputs and can lead to incorrect states, while logical reversals perform opposite deltas(e.g. increment vs decrement) of targeted actions.}
 
 %% ----------------------------------------------------
 %% Saga Transactions
@@ -119,7 +130,7 @@ another already committed transaction. Such a reversal has to be logical instead
 \subsection*{Saga Transactions}
 A sequence of chained transactions $T_1$-$T_n$ and compensating transactions $C_1$-$C_{n-1}$ where 
 one of the following is guaranteed: The transactions will commit in the order 
-$T_1$,\dots$T_j$,$C_j$\dots$C_1$ (where $j<n$).
+$T_1$,\dots$T_j$,$C_j$\dots$C_1$ (where $j<n$). [There is a citation]
 
 %% ==================================================================
 %% CONCURRENCY CONTROL
@@ -128,9 +139,17 @@ $T_1$,\dots$T_j$,$C_j$\dots$C_1$ (where $j<n$).
 A DBMS's \textit{concurrency control protocol} to allow transactions to access a database in a 
 multi-programmed fashion while preserving the illusion that each of them is executing alone on a 
 dedicated system. The goal is to have the effect of a group of transactions on the database's state 
-is equivalent to any serial execution of all transactions.
+is equivalent to any serial execution of all transactions. \rr{It provides \textit{atomicity} and \textit{isolation} in ACID properties.}
+
+\rr{\subsection*{Transaction Internal State}
+\begin{itemize}
+    \item Status (current execution state)
+    \item Undo Log Entries (stored in-memory ephemeral data structures, dropped on commit)
+    \item Redo Log Entries (appended to in-memory tail of WAL, flushed to disk on commit, used for recovery)
+    \item Read/Write/Scan Set (depends on concurrency control schemes)
+\end{itemize}}
     
-Concurrency Control Schemes
+\subsection*{Concurrency Control Schemes}
 \begin{enumerate}
     \item \textbf{Two-Phase Locking (Pessimistic):}
     Assume transactions will conflict so they must acquire locks on database objects before they 
@@ -145,6 +164,13 @@ Concurrency Control Schemes
 %% TWO-PHASE LOCKING
 %% ==================================================================
 \section{Two-Phase Locking}
+\rr{Contains two separate phases when executing a transaction: 
+\begin{itemize}
+    \item \textbf{Growing Phase:} Acquire locks.
+    \item \textbf{Shrinking Phase:} As soon as one lock is released, Growing Phase transitions to Shrinking Phase. We are unable to add any more new locks; we can only release previous locks.
+\end{itemize}
+}
+
 There are two ways to deal with deadlocks in a two-phase locking (2PL) concurrency control protocol:
 
 \begin{itemize}
@@ -160,13 +186,15 @@ There are two ways to deal with deadlocks in a two-phase locking (2PL) concurren
 %% TIMESTAMP ORDERING AND OCC
 %% ==================================================================
 \section{Timestamp Ordering Concurrency Control}
-Use timestamps to determine the order of transactions.
+Use timestamps to determine the order of transactions. All timestamp ordering concurrency control schemes are optimistic compared to locking protocols.
 
 %% ----------------------------------------------------
 %% Basic T/O Protocol
 %% ----------------------------------------------------
 \subsection*{Basic T/O Protocol}
 \begin{itemize}
+    \item \rr{Records both read and write timestamps.}
+
     \item
     Every transaction is assigned a unique timestamp when they arrive in the system.
     
@@ -177,6 +205,11 @@ Use timestamps to determine the order of transactions.
     \item
     Each transaction check for conflicts on each read/write by comparing their timestamp with the 
     timestamp of the tuple they are accessing.
+    \rr{
+    \begin{itemize}
+        \item For a read operation on object A, we compare it with the write timestamp. If the read operation's timestamp is newer, we allow its execution and update A's read timestamp. Otherwise it aborts.
+        \item For a write operation on object A, we compare it with both A's read and write timestamps. If the write operation's timestamp is newer, we allows its exeuction and update A's write timestamp. Otherwise it aborts.
+    \end{itemize}}
     
     \item
     The DBMS needs copy a tuple into the transaction's private workspace when reading a tuple to 
@@ -189,7 +222,7 @@ Use timestamps to determine the order of transactions.
 \subsection*{Optimistic Concurrency Control (OCC)}
 Store all changes in private workspace.
 Check for conflicts at commit time and then merge.
-First proposed in 1981 at CMU by H. T. Kung~\cite{p213-kung}.
+First proposed in 1981 at CMU by H. T.Kung~\cite{p213-kung}. \rr{This is similar to a multi-version design, but OCC's versions are only visible to the current transaction. Unlike Basic T/O, OCC only records write timestamps.}
 
 The protocol puts transactions through three phases during its execution:
 \begin{enumerate}
@@ -251,9 +284,10 @@ have their own performance trade-offs.
 \section{Performance Bottlenecks}
 All concurrency control protocols have performance and scalability problems when there are a large 
 number of concurrent threads and large amount of contention (i.e., the transactions are all trying 
-to read/write to the same set of tuples).
+to read/write to the same set of tuples). 
+\rr{When there is low contention, optimistic concurrency control protocols perform better because DBMS spends less time checking for conflicts.}
 
-\textbf{Lock Thrashing:}
+\textbf{Lock Thrashing}
 \begin{itemize}
     \item
     Each transaction waits longer to acquire locks, causing other transaction to wait longer to 
@@ -263,7 +297,7 @@ to read/write to the same set of tuples).
     Can measure this phenomenon by removing deadlock detection/prevention overhead.
 \end{itemize}
     
-\textbf{Memory Allocation}
+\textbf{Memory/Timestamp Allocation}
 \begin{itemize}
     \item
     Copying data on every read/write access slows down the DBMS because of contention on the memory 
@@ -282,7 +316,7 @@ enforcing it may allow too little parallelism and limit performance. Thus, an ap
 want to use a weaker level of consistency to improve scalability. Isolation levels control the 
 extent that a transaction is exposed to the actions of other concurrent transactions.
 
-The SQL standard definitions isolation levels in terms of what anomalies a transaction could be 
+The SQL standard defines isolation levels in terms of what anomalies a transaction could be 
 exposed to during execution:
 \begin{itemize}
     \item \textbf{Dirty Read:}
@@ -316,7 +350,9 @@ occur in a 2PL-based DBMS~\cite{p1-berenson}. There are two additional isolation
 \begin{enumerate}
     \item \isoLevel{Cursor Stability}
     \begin{itemize}
-        \item Between repeatable reads and read committed
+        \item \rr{Cursor Lock is held on a single object that might be operated by multiple queries. The lock is released as soon as the owner moves to another object. }
+        \item \rr{Only one cursor lock can be held at a time, so there will never be any deadlocks.}
+        \item Between \isoLevel{REPEATABLE READS} and \isoLevel{READ COMMITTED}
         \item Prevents ``Lost Update'' anomaly.
         \item Default isolation level in \dbSys{IBM DB2}.
     \end{itemize}
@@ -333,6 +369,7 @@ occur in a 2PL-based DBMS~\cite{p1-berenson}. There are two additional isolation
         
         \item
         Susceptible to the ``Write Skew'' anomaly.
+        \item \rr{Between \isoLevel{SERIALIZABLE} and \isoLevel{READ COMMITTED}}
     \end{itemize}
 \end{enumerate}
 

@@ -3,8 +3,10 @@
 \newcommand{\lecturenumber}{01}
 \newcommand{\lecturename}{In-Memory Databases}
 \newcommand{\lecturedata}{2019-01-14}
+\newcommand{\rr}[1]{\textcolor{red}{#1}}
 
 \usepackage{../dbnotes}
+\usepackage{xcolor}
 
 \begin{document}
 
@@ -24,7 +26,7 @@ The first DBMSs in the 1970s were designed in environment with the following cha
     \item Disk is slow. \textbf{Seriously slow}
 \end{itemize}
    
-But now DRAM capacities are large enough that most structured databases will entirely fit in memory.
+But now DRAM capacities are large \rr{and cheap} enough that most structured databases \rr{(gigabytes/low terabytes)} will entirely fit in memory.
 This merits us to rethink all aspects of the DBMS to account for this. This course is about ways to 
 do this.
 
@@ -53,7 +55,10 @@ The system uses an in-memory (volatile) \textit{buffer pool} to cache the blocks
         
     \item
     If not, the DBMS retrieves the memory from disk and copies it into a frame in its 
-    buffer pool.
+    buffer pool. \rr{A pointer to the frame is returned for further operations.}
+    
+    \item \rr{If there is no free frame to store the new page, DBMS finds a page to evict.
+    If the evicted page is dirty, DBMS writes it on disk.}
         
     \item
     Once the page is in memory, the DBMS translates any on-disk addresses to their 
@@ -61,7 +66,8 @@ The system uses an in-memory (volatile) \textit{buffer pool} to cache the blocks
         
     \item
     Every tuple access has to go through the buffer pool manager regardless of whether 
-    that data will always be in memory.
+    that data will always be in memory. \rr{So even if we provide a large enough
+    memory for our database, these operations still occur.}
 \end{itemize}
     
 %% ----------------------------------------------------
@@ -73,7 +79,8 @@ it tries to access data that is not in memory.
         
 The system's concurrency control protocol allows the DBMS to execute other transactions at 
 the same time to improve performance while still preserving atomicity and isolation 
-guarantees.
+guarantees. \rr{However, since locks are stored separately in memory, DBMS spends extra time to
+locate lock owners.}
         
 %         \item Locks are stored in separate data structure to avoid being swapped to disk
 %         \item Lock~\cite{a16-graefe}
@@ -95,7 +102,9 @@ guarantees.
 \subsection*{Logging and Recovery}
 Most DBMS use \texttt{STEAL} + \texttt{NO-FORCE} buffer pool policies so all modifications 
 have to be flushed to the WAL before a transaction can commit~\cite{franklin14}.
-Log entries contain before and after image of record modified.
+Log entries contain before and after image of record modified. \rr{WAL flushes to disk separately
+from corresponding modified database pages, so it takes extra work to keep track of what log record is
+responsible for what page (e.g., LSN).}
 
 
 %% ==================================================================
@@ -120,9 +129,12 @@ change to account for other bottlenecks:~\cite{stonebraker2007}
 %% Data Organization
 %% ----------------------------------------------------
 \subsection*{Data Organization}
-An in-memory DBMS splits the data for tuples into fixed-length and variable-length pools. Indexes 
-use pointers to the fixed-length data for each tuple. These tuples then have 64-bit pointers to any 
+\rr{We no longer need slotted pages as we do not have to worry about packing pages data onto disk. We also do not have to store the data close to each other as we are storing them on disk. Instead,} an in-memory DBMS splits the data for tuples into fixed-length and variable-length pools. Indexes 
+use direct pointers \rr{instead of record ids} to the fixed-length data for each tuple. These tuples then have 64-bit pointers to any 
 variable-length values stored in a separate memory location.
+
+\rr{It is possible to directly use Memory-map(mmap) as a way to organized data. As a result, however, this yields 
+memory management to the OS and gives away fine-tuned control on memory. This approach is feasible for read-only DBMS, but is generally not recommended.}
     
 %% ----------------------------------------------------
 %% Concurrency Control
@@ -186,7 +198,7 @@ during recovery.
     \item \dbSys{Dali}:
     Multi-process shared memory storage manager using memory mapped files~\cite{jagadish94}.
         
-    \dbSys{P*TIME}:
+    \item \dbSys{P*TIME}:
     Korean in-memory DBMS from the 2000s~\cite{cha04}.
     Lots of interesting features (e.g., hybrid storage layouts, support for larger-than-memory 
     databases). Sold to SAP in 2005 and is now part of HANA.

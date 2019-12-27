@@ -1,0 +1,172 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{11}
+\newcommand{\lecturename}{Larger-than-Memory Databases}
+\newcommand{\lecturedata}{2019-02-26}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% Bloom Filters
+%% ==================================================================
+\section{Bloom Filters}
+Bloom Filter is a probabilistic data structure (bitmap) that answers set membership queries. A bloom filter guarantees that false negatives will never occur, but false positives can sometimes occur.
+
+\begin{itemize}
+    \item \textbf{Insert(x)}: Use $k$ hash functions to set bits in the filter to 1.
+    \item \textbf{Lookup(x)}: Check whether the bits are 1 for each hash function.
+\end{itemize}
+
+%% ==================================================================
+%% Larger-than-Memory Databases
+%% ==================================================================
+\section{Larger-than-Memory Databases}
+DRAM is expensive to buy and maintain, so it would be nice if an in-memory DBMS could use cheaper storage like disks to offload unimportant or less useful data. We want to allow an in-memory DBMS to store/access data on disk without bringing back all the slow parts of a disk-oriented DBMS. To achieve this, we need to be aware of the different hardware access methods between in-memory storage(tuple-based) and disk storage (block-based).
+
+Since OLAP queries generally access entire tables during large sequential scans, there isn't anything about the workload for the DBMS to exploit that a disk-oriented buffer pool can not handle. Therefore we will focus on how to support OLTP workloads with disk-resident data in a in-memory DBMS.
+
+Memory mapping is still bad a idea~\cite{Graefe:2014}. Write-ahead logging requires that a modified page cannot be written to disk before the log records that made those changes are written. If the DBMS uses \texttt{mmap}, it will not have control over when pages will be written to disk and when the log records that correspond to the changes that modify that page get written out to disk. Moreover, using \texttt{mmap} also makes it difficult to support asynchronous read-ahead or writing multiple pages concurrently.
+
+%% ==================================================================
+%% OLTP Issues
+%% ==================================================================
+\section{OLTP Issues}
+OLTP workloads almost always have access patterns that divide the database into hot and cold portions~\cite{Ma}. Hot data should be readily available, since transactions will are more likely to access hot tuples. As for cold data, the DBMS can use a mechanism to move it out to disk and then retrieve it if it is ever needed again. However, cold data should still appear as if it is in memory to other parts of the system (e.g., execution engine) to minimize the need for specialized code or alternative implementations of the DBMSs core components.
+
+%% ----------------------------------------------------
+%% Cold Data Identification
+%% ----------------------------------------------------
+\subsection*{Cold Data Identification}
+The DBMS needs to know how to categorize hot/cold data. There are two ways of doing this:
+\begin{itemize}
+    \item\textbf{On-line:} The DBMS monitors transactions' access patterns and tracks how often tuples are used. It then records meta-data embedded in tuple headers to keep track of when the last time they are.
+    \item \textbf{Off-line:} The DBMS maintains a tuple access log during transaction execution and compute frequencies in the background. It then uses these frequencies to differentiate between hot and cold data.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Eviction Policies
+%% ----------------------------------------------------
+\subsection*{Eviction Policies}
+Eviction occurs when the DBMS runs out of space. The DBMS evacuates old tuples from memory and writes them to disk. We will discuss how to decide the timing for eviction and what information to keep for evicted tuples.
+
+\textbf{Eviction Timing:} The DBMS needs to figure out when it is running out of space. There are two ways to identify when to perform an eviction:
+\begin{itemize}
+    \item \textbf{Threshold:} The DBMS monitors memory usage and begins evicting tuples when it reaches an administer-defined threshold. The DBMS has to manually move data.
+    \item \textbf{OS Virtual Memory:} Use \texttt{mmap} and let the OS decide when it wants to move data on to disk. Since the OS already tracks how pages are accessed in virtual memory, the DBMS can rely on the OS to infer eviction timing. This process is carried out in the background.
+\end{itemize}
+
+\textbf{Evicted Tuple Metadata:} After eviction, the DBMS needs to keep some metadata about evicted tuples. There are three methods:
+\begin{itemize}
+    \item \textbf{Tombstones:} Leave a marker that points to the on-disk tuple. The DBMS then updates indexes to point to the tombstone tuples. To conserve space, the tombstone is expected to be smaller than the original size of the table. If the DBMS performs an index look-up and finds a tombstone tuple, the DBMS will realize that it needs to go out to disk and fetch the missing data.
+    \item \textbf{Bloom Filters:} Use approximate data structure for each index that tracks the tuples stored on disk. For a given key, the filter records that there was a tuple that existed on disk. Instead of storing every value in the set, it maintains a bitmap of hashes that approximate the existence of a value in the set. Bloom filter does not yield false negatives; if the tuple does not exist in the bloom filter, it does not exist on disk. Therefore for each query, the DBMS checks both the index and bloom filter.
+    \item \textbf{OS Virtual Memory:} If the DBMS uses \texttt{mmap}, then the OS tracks what data is on disk. The DBMS does not need to maintain any additional metadata.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Data Retrieval Policies
+%% ----------------------------------------------------
+\subsection*{Data Retrieval Policies}
+When evicted data needs to be accessed again, the DBMS needs to follow a certain retrieval policy to fetch it back from the memory.
+
+\textbf{Data Retrieval Granularity:} Since we are storing everything as 4KB pages on disk, it is likely that the size of a tuple is less than a disk page. Therefore, for a single disk I/O, the DBMS will retrieve a lot of irrelevant data. There are two approaches for resolving this:
+\begin{itemize}
+    \item \textbf{All Tuples in Block:} Merge all the tuples retrieved from a block regardless of whether they are needed. The DBMS then updates indexes because the merged tuples now exist in memory. This operation moves around a lot of tuples and indexes and could be expensive for the CPU if the update is only needed for one tuple. 
+    
+    Another problem is that merged tuples are likely to be evicted again, contributing to extra disk I/Os. Even though the tuple of interest becomes hot, all the other tuples in the page are still cold. Those cold data will probably get written out again during the next round of eviction.
+    \item \textbf{Only Tuples Needed:} Only merge the tuples that were accessed by a query back into the in-memory table. This is computationally faster since the DBMS does not need to update the indexes, but this method requires additional book-keeping to track holes in the pages on disk.
+\end{itemize}
+
+\textbf{Merging Threshold:} There are different ways for the DBMS to merge back tuples depending on the DBMS's merging threshold:
+\begin{itemize}
+    \item \textbf{Always Merge:} Put retrieved tuples into the table and update all the indexes.
+    \item \textbf{Merge Only One Update:} Merge retrieved tuples into the table only if they are used in an \sql{UPDATE} query and put all other tuples in a temporary buffer.
+    \item \textbf{Selective Merge:} Keep track of how often each block is retrieved. If a block’s access frequency is above some threshold, merge it back into the table heap. 
+\end{itemize}
+
+\textbf{Retrieval Mechanism:} When a query accesses a tuple that is evicted from memory, the DBMS needs to retrieve data from disk and compute the correct result for the query. There are two approaches:
+\begin{itemize}
+    \item \textbf{Abort and Restart:} Abort the transaction that accessed the evicted tuple. In a separate background thread, retrieve the data from disk and merge it into memory based on the DBMS's merging policy. When the data is ready, the DBMS restarts the transaction. 
+    
+    This approach cannot guarantee consistency for large queries that access an entire table that does not fit in memory. As the DBMS reaches the table region that is not in memory, it aborts the transaction, evicts scanned region of the table and fetches the region not in memory from disk. And if the DBMS restart the query, it will again attempt to fetch the region of the table that has been just evicted. The only way to go around this loop is to relax consistency by allowing reads of the table in past versions.
+    \item \textbf{Synchronous Retrieval:} Stall the transaction when it accesses an evicted tuple while the DBMS fetches the data and merges it back into memory. If the query is accessing a bunch of cold tuples, it would be better to not stall immediately when the query hits the first tuple. Instead, the DBMS can just collect cold data first and fetch all of them later once they are needed. In this way, the DBMS can avoid interleaving scans with constant stalling operations.
+\end{itemize}
+
+%% ==================================================================
+%% Implementations
+%% ==================================================================
+\section{Implementations}
+There are three main categories of larger-than-memory databases implementations. They could be tuple-based (\textbf{H-Store, Hekaton, EPFL VoltDB, Apache Geode}), block/page-based (\textbf{Lean Store}), or table-based (\textbf{MemSQL}).
+
+%% ----------------------------------------------------
+%% H-Store
+%% ----------------------------------------------------
+\subsection*{H-Store Anti-Cache}
+H-Store Anti-Cache~\cite{DeBrabant:2013} uses on-line identification to track how transactions access individual tuples. It uses an administrator-defined threshold to initiate the eviction process once that threshold has been reached. The eviction process continues until it hits some low water-mark. 
+
+Anti-Cache also uses tombstones that are stored in a separate table heap. Its retrieval mechanism is abort-and-restart. The DBMS aborts the transaction, rollbacks all its changes, places them into a side queue, fetches the data it needs and uses a callback mechanism to notify the DBMS that the requested data are available in memory. 
+
+Anti-Cache uses block-level granularity and chooses always merge as its merging threshold. It added selective merging in 2016~\cite{DeBrabant:2013}.
+
+%% ----------------------------------------------------
+%% Hekaton
+%% ----------------------------------------------------
+\subsection*{Hekaton - Project Siberia}
+Project Siberia~\cite{Eldawy:2014} is the larger-than-memory database version for Hekaton. Due to its engineering complexity, it was never added to public versions of Hekaton.
+
+Project Siberia uses off-line identification, with a log that records how transactions access and a background thread then computes histograms based on the log. It uses a similar administrator-defined threshold as H-Store Anti-Cache. It uses bloom filters for each index to find out whether a tuple would exist on disk.
+
+Project Siberia uses a synchronous retrieval policy. The DBMS blocks the query then fetches the data needed. Project Siberia chose this policy because it is not a store-procedure-based system like H-Store and VoltDB. Thus, it is not able to restart each transaction from the beginning without requiring modifications in the application.
+
+It uses tuple-level granularity for merging and always merge as its merging threshold.
+
+%% ----------------------------------------------------
+%% EPFL VoltDB
+%% ----------------------------------------------------
+\subsection*{EPFL VoltDB}
+Researchers at EPFL created an experimental version of VoltDB~\cite{Stoica:2013}. EPFL VoltDB uses OS virtual memory to yield eviction policy to the OS. It uses a single in-memory table heap backed by \texttt{mmap}. It would designate different regions of the memory to differentiate between hot and cold tuples. For the hot tuples, EPFL VoltDB uses \texttt{madvise} to tell the OS to pin the hot region and never evict those pages. The cold region will be allowed to be evicted from memory. The DBMS uses off-line identification and figures out some hot tuples turn cold. It moves the tuples from the hot region into the cold region, handing the control over those tuples to the OS.
+
+Becaues EPFL VoltDB uses OS virtual memory with \texttt{mmap/madvise}, it has to use synchronous retrieval policy, page-level granularity and always merge threshold. When the OS fetches something not in memory, it will hit a page fault and stall the thread. Virtual memory is also based on pages and always merges everything because the OS does not anything about the DBMS's page.
+
+%% ----------------------------------------------------
+%% Apache Geode
+%% ----------------------------------------------------
+\subsection*{Apache Geode - Overflow Tables}
+Apache Geode is a distributed in-memory database. Instead of writing directly to disk, it has a shared disk layer with HDFS that the DBMS uses to write data out. Overflow Tables use on-line Identification, administrator-defined threshold, synchronous retrieval and tuple-level granularity.
+
+Overflow Tables merges tuple on update. Since HDFS is append-only, the DBMS needs to do extra work to invalidate a page. Merging on update reduces the amount of work required because the DBMS no longer needs to invalidate a page during an \sql{UPDATE}.
+%% ----------------------------------------------------
+%% Lean Store
+%% ----------------------------------------------------
+\subsection*{Lean Store}
+Tuple-based approaches require the DBMS to track metadata about individual tuples on a per-tuple basis. None of the approaches also try to reduce storage overhead of indexes, which account for a large portion of database storage in OLTP applications. We want a unified policy for both tuples and indexes.
+
+Lean Store~\cite{8509247} is a system architecture that attempts to resolve this problem. It is a prototype in-memory storage manager from TUM that supports larger-than-memory databases. It is able to evict data in both tuples and indexes. It uses a hierarchical model to keep track of what to keep in memory and employs randomized block eviction.
+
+\textbf{Pointer Sizzling:} Switch the contents of pointers based on whether the target object resides in memory or on disk. The first bit in address tells what kind of address it is. This only works if there is only one pointer to the object. If there are extra pointers pointing to the target object, than this operation is not atomic as the DBMS needs to set latches else to update the pointers.
+
+\textbf{Replacement Strategy:} Randomly select blocks for eviction. The DBMS does not have to update meta-data every time a transaction accesses a hot tuple. After that, the DBMS should unswizzle their pointer but leave them in memory. The DBMS then add those pages to a FIFO queue to stage them for eviction. If the page is accessed again, it is removed from queue. Otherwise, the DBMS evicts the page when it reaches the front of queue.
+
+\textbf{Block Hierarchy:} The DBMS organizes blocks in a tree hierarchy. Each page has only one parent, which means that there is only a single pointer. The DBMS can only evict a page if its children are also evicted. This avoids the problem of evicting pages that contain
+swizzled pointers. If a page is selected but it has in-memory children, then it switches to select one of its children for eviction.
+
+%% ----------------------------------------------------
+%% MemSQL
+%% ----------------------------------------------------
+\subsection*{MemSQL - Columnar Tables}
+MemSQL is an HTAP system with both a row-store and a column-store. The row-store always exists in memory and is never eviected; the column store is backed by \texttt{mmap} that can be swapped to disk by the OS. If updates need to be performed on the column store, MemSQL stage those updates in its delta store that slowly merges updates into the column store. 
+
+MemSQL uses manual identification, as the administrator has to manually declare a table as a distinct disk-resident columnar table. The column store also appears as a separate logical table to the application. Since the column store is backed by \texttt{mmap}, no evicted metadata is needed. The OS knows nothing about the page, so MemSQL also has to use synchronous retrieval policy and always merge as its merging threshold. MemSQL rewrote their column-store engine to not use \texttt{mmap} in 2016.
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{11-largerthanmemory}
+
+\end{document}

@@ -1,0 +1,210 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{12}
+\newcommand{\lecturename}{Recovery Protocols}
+\newcommand{\lecturedata}{2019-02-28}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% DATABASE RECOVERY
+%% ==================================================================
+\section{Database Recovery}
+Database recovery algorithms are techniques to ensure database \textbf{consistency}, transaction \textbf{atomicity}, and \textbf{durability} despite failures.
+
+Recovery Algorithms have two parts. The first part involves actions during normal transaction processing to ensure that the DBMS can recover from a failure. The second part is about actions after a failure to recover the database to a state that ensures atomicity, consistency, and durability.
+
+Many of the early papers (1980s) on recovery for in-memory DBMSs assume that there is non-volatile memory~\cite{p104-lehman}, which consists of battery-packed DRAMs that are large and finicky. If a machine loses power, the battery on the DRAM will provide enough power so that the DRAM can write out to some stable storage. People also assume that real non-volatile memory (NVM) is coming, so they have not considered to implement logging and check-pointing protocols. This type of hardware is not widely available yet (i.e., you cannot get them on Amazon), so we want to use existing SSD/HDDs.
+
+%% ----------------------------------------------------
+%% In-memory Database Recovery
+%% ----------------------------------------------------
+\subsection*{In-memory Database Recovery}
+Recovering in-memory databases is slightly easier than disk-oriented ones. In-memory databases do not have buffer pools, so the DBMS does not have to keep track of dirty pages in case of a crashing during recovery. This saves the need to maintain log sequence numbers (LSN) and compensation log records.
+
+Moreover, less data is recorded on disk for in-memory DBMSs. If the DBMS writes dirty pages that have been modified by transactions that have not committed yet, undo records are needed since the DBMS needs them to reverse changes. In-memory databases do not have dirty pages and nothing that is uncommitted will ever get written to disk. Therefore, in-memory databases store only redo records.
+
+Almost no in-memory databases (except for Lean Store~\cite{8509247}) record changes to indexes. If the DBMS crashes, it has to reload the database from the disk into memory. Instead of keeping track of how indexes are modified, the DBMS can rebuild indexes as the DBMS loads data from checkpoint.
+
+However, in-memory DBMSs are still stymied by the slow synchronization time of non-volatile storage. We need to come up with efficient logging/recovery mechanisms for in-memory DBMSs.
+
+%% ==================================================================
+%% Logging Schemes
+%% ==================================================================
+\section{Logging Schemes}
+The DBMS uses logging to record changes made by the DBMS and recover from failure. There are two different classes of logging schemes: 
+\begin{itemize}
+    \item \textbf{Physical Logging:} Record the changes made to a specific record in the database (e.g., store the original value and the after value for an attribute that is changed by a query).
+    \item \textbf{Logical Logging:} Record the high-level operations executed by transactions (e.g. the \sql{UPDATE}, \sql{DELETE} and \sql{INSERT} queries invoked by a transaction).
+\end{itemize}
+
+Logical logging writes less data in each log record than physical logging. If the DBMS updates a billion tuples, logical logging will just include that single update statement, while physical logging will store all the changes that are done to those tuples.
+
+However, it is difficult to implement recovery with logical logging if there are concurrent transactions. It is hard for the DBMS to determine the order of the transactions that modified the tuples. The lower the DBMS's isolation level, the harder it is to figure the ordering of transactions.
+
+It also takes longer time to recover the DBMS if it uses logical logging. During recovery, the DBMS has to re-execute every transaction all over again. For instance, if updating a billion tuples took an hour to complete, it would take another hour during the recovery phase.
+
+%% ----------------------------------------------------
+%% Silo
+%% ----------------------------------------------------
+\subsection*{Silo}
+Silo is an in-memory OLTP DBMS from Harvard/MIT~\cite{zheng-osdi14}. It uses a single-versioned OCC with epoch-based GC and is created by the same authors (led by Eddie Kohler) of Masstree.
+
+\textbf{Silo Logging Protocol:} Silo uses physical logging and checkpoints to ensure durability of transactions. It achieves high performance through decentralizing and parallelizing all aspects of logging, checkpointing and recovery. Silo DBMS assumes that there is one dedicated storage device per CPU socket. Each CPU socket will have a bunch of worker threads, checkpoint threads, and a single logger thread. The logger thread is responsible for writing out to disk the modifications made by the worker threads running on the same socket.
+
+As the worker executes a transaction, it creates new log records that contain the values that were written to the database (i.e., \sql{REDO}). At some point, the redo information will be handed to the logger thread that will write it out to to disk. To make sure the DBMS has enough memory for the generated log records, each logger thread maintains a pool of log buffers that are given to its worker threads. When a worker's buffer is full, it gives it back to the logger thread to flush to disk and attempts to get a new buffer. If there are no available buffers, the worker stalls.
+
+\textbf{SiloR Log Files:} Every 100 epochs, the logger thread writes all its log buffers out to files. The old file is renamed with a marker indicating the maximum epoch of records that it contains. The log records are then appended to this new file.
+
+\textbf{Log Record Format:}
+\begin{itemize}
+    \item Id of the transaction that modified the record (TID)
+    \item A set of value log triplets (Table, Key, Value)
+    \item The value can be a list of attribute and value
+\end{itemize}
+
+\textbf{SiloR Persistent Epoch:} With multiple sockets running at the same time, the DBMS needs a mechanism to avoid coordination between different sockets and keep track of how far each log file has been written in the time scale of its epoch. SiloR introduces a special logger thread to keep track of the current persistent epoch (\textit{pepoch}). It writes to a special log file that maintains the highest epoch that is durable across all loggers.
+
+Transactions are considered fully committed only if the epoch they are executed in is less than or equal to the current persistent epoch. This guarantees that no matter on what socket a transaction has modified data, all its log records have been written to disk.
+
+\textbf{SiloR Recovery Protocols:} To recover from crash, the DBMS installs the contents of the last checkpoint into the database and rebuilds all the indexes. 
+
+Then the DBMS moves on to the log replay stage. The DBMS processes logs in reverse order (newest to oldest) to reconcile the latest version of each tuple. This allows the DBMS to skip replaying modifications for a tuple that are prior to the tuple's latest version. The transaction ids generated at runtime are enough to determine the serial order for transactions during recovery. There is no need to monitor transaction ordering across different log files that will be replayed. For a given transaction, it can only modify data that is maintained by that socket if it is in that log file.
+
+\textbf{SiloR Replay:} The first step is to check the \textit{pepoch} file to determine the most recent persistent epoch. Any log record after the \textit{pepoch} is ignored because it is never committed. 
+
+Log files are then replayed from newest to oldest; value logging can be replayed in any order. For each log record, the thread checks to see whether the tuple already exists. If it does not, then it is created with the value. If it does, then the tuple's value is overwritten only if the log TID is newer than tuple's TID.
+
+%% ==================================================================
+%% Logging Optimizations
+%% ==================================================================
+\section{Logging Optimizations}
+The slowest part of the transaction is usually waiting for the DBMS to flush the log records to disk. The DBMS has to wait until the records are safely written before the DBMS can return the acknowledgment to the client. One recommended approach is to use a background thread for flushing log records, so the DBMS can operate on data modified by the transactions as if they have already been written to disk. There are two other approaches for improving the logging phase:
+
+\textbf{Group Commit:} Group Commit is an idea developed in IBM IMS FastPath in the 1980s. The DMBS can batch together log records from multiple transactions and flush them together with a single \texttt{fsync}. Logs are flushed either after a timeout or when the buffer gets full. This amortizes the cost of I/O over several transactions.
+
+\textbf{Early Lock Release:} A transaction's locks can be released before its commit record is written to disk as long as it does not return results to the client before becoming durable. Other transactions that read data updated by a \textit{pre-committed} transaction become dependent on it and also have to wait for their predecessor's log records to reach disk.
+
+%% ==================================================================
+%% Checkpoint Protocols
+%% ==================================================================
+\section{Checkpoint Protocols}
+Logging allows the DBMS to recover the database after a crash/restart. But the DBMS has to replay the entire log each time. Checkpoints allow the systems to ignore large segments of log to reduce recovery time.
+
+There are different approaches for how the DBMS can create a new checkpoint for an in-memory database. The choice of approach in a DBMS is slightly coupled with its concurrency control scheme (e.g., single version or multi-version). We also want to minimize the overall influence for a checkpoint operation over a worker thread. The checkpoint threads should scan each table and write data asynchronously to disk.
+
+Here are a list of ideal checkpoint properties that checkpoint protocols should try to fulfill~\cite{5507562}:
+\begin{itemize}
+    \item Do not slow down regular transaction processing.
+    \item Do not introduce unacceptable latency spikes.
+    \item Do not require excessive memory overhead.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Consistent vs. Fuzzy Checkpoints
+%% ----------------------------------------------------
+\subsection*{Consistent vs. Fuzzy Checkpoints}
+A checkpoint can be divided into two categories based on its consistency:
+
+\textbf{Consistent Checkpoints:} Represent a consistent snapshot of the database at some point in time that only contains committed changes. This approach is equivalent to doing a sequential scan on the entire table, and then write a snapshot to the disk. On recovery, the DBMS needs no additional processing.
+
+\textbf{Fuzzy Checkpoints:} The snapshot could contain records updated from transactions that have not finished yet. The DBMS must do additional processing to remove those changes.
+
+%% ----------------------------------------------------
+%% Checkpoint Mechanism
+%% ----------------------------------------------------
+\subsection*{Checkpoint Mechanism}
+There are two approaches for creating checkpoints:
+
+\textbf{Do It Yourself:} The DBMS is responsible for creating a snapshot of the database in memory. This approach allows leveraging on multi-versioned storage (e.g., creating checkpoint snapshots based on delta-versioning).
+
+\textbf{Hyper - OS Fork Snapshots:}~\cite{5767867} The DBMS forks the process and has the child process write out the contents of the database to disk. Before anything in the child pages or parent pages is modified, this fork is just a mapping from the pages of child process to the physical pages of its parent process. This approach is more expensive as it copies everything in memory and requires extra work to remove uncommitted changes. 
+
+This approach is later abandoned by Hyper as the copy and write overhead from the OS becomes too significant. As the parent process continues processing transactions, it builds up dirty pages that initiates a series of OS copies immediately after the child gets forked, which results in performance drops. Hyper would later switch to an MVCC model.
+
+%% ----------------------------------------------------
+%% Checkpoint Contents
+%% ----------------------------------------------------
+\subsection*{Checkpoint Contents}
+A checkpoint file can be categorized into two categories based on its scale:
+
+\textbf{Complete Checkpoint:} Write out every tuple in every table regardless of whether were modified since the last checkpoint. This is easier to implement as it writes the entire database to disk.
+
+\textbf{Delta Checkpoint:} Write out only the tuples that were modified since the last checkpoint. The DBMS can merge checkpoints together in the background.
+
+%% ----------------------------------------------------
+%% Checkpoint Frequency
+%% ----------------------------------------------------
+\subsection*{Checkpoint Frequency}
+There are different intervals/timing that the DBMS can use to issue checkpoints:
+\begin{itemize}
+  \item \textbf{Time-based:} Wait for a fixed period of time after the last checkpoint has completed before starting a new one.
+  \item \textbf{Log File Size Threshold:} Triggers checkpoint after a certain amount of data has been written to the log file. This approach avoids creating unnecessary checkpoints during time when the DBMS is not active.
+  \item \textbf{On Shutdown:} Perform a checkpoint when the DBA instructs the system to shut itself down. After DBMS receives the shutdown instruction, it should block new transactions and finish/timeout any outstanding transactions. Afterwards the DBMS can initiate the checkpoint and completely shutdown. Every DBMS (hopefully) does this.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Checkpoint Implementations
+%% ----------------------------------------------------
+\subsection*{Checkpoint Implementations}
+\begin{center}
+ \begin{tabular}{|c|c|c|c|} 
+     \hline
+     DBMS & Type & Contents & Frequency \\ [0.5ex] 
+     \hline\hline
+     MemSQL & Consistent & Complete & Log Size \\ 
+     \hline
+     VoltDB & Consistent & Fuzzy & Time-based \\
+     \hline
+     Altibase & Fuzzy & Complete & Manual? \\
+     \hline
+     TimesTen (Blocking) & Consistent & Complete & On Shutdown \\
+     \hline
+     TimesTen (Non-Blocking) & Fuzzy & Complete & Time-based \\
+     \hline
+     Hekaton & Consistent & Delta & Log Size \\
+     \hline
+     SAP HANA & Fuzzy & Complete & Time-based \\ 
+ \hline
+\end{tabular}
+\end{center}
+
+%% ==================================================================
+%% Restart Protocols
+%% ==================================================================
+\section{Restart Protocols}
+Not all DBMS restarts are due to crashes; restarts could also happen due to maintenance. There could be an OS update, hardware upgrade or DBMS software update. The DBMS needs a way to quickly restart without having to re-read the entire database from disk again.
+
+%% ----------------------------------------------------
+%% Facebook Scuba
+%% ----------------------------------------------------
+\subsection*{Facebook Scuba}
+Facebook Scuba is a distributed, in-memory DBMS for time-series event analysis and anomaly detection~\cite{Goel:2014}. It is expected to install frequent updates in an agile development cycle, with an updating coming every two or three weeks. Scuba decouples the in-memory database lifetime from the process lifetime. By storing the database shared memory, the DBMS process can restart and the memory contents will survive. 
+
+Scuba uses a heterogeneous architecture with two different types of nodes:
+\begin{itemize}
+  \item \textbf{Leaf Nodes:} Execute scans/filters on in-memory data. 
+  \item \textbf{Aggregator Nodes:} Combine results from leaf nodes.
+\end{itemize} 
+
+\textbf{Shared Memory Restarts:} 
+Scuba considered two approaches for doing shared memory restarts. 
+
+The first approach is to use \textbf{Shared Memory Heaps}. All data is allocated in shared memory during normal operations. The DMBS has to use a custom allocator to subdivide memory segments for thread safety and scalability. The downside of this approach is that the DBMS cannot use lazy allocation of backing pages with shared memory due to the nature of \texttt{jemalloc}(?).
+
+The other approach is to \textbf{Copy on Shutdown}. During normal operations, the DBMS allocate all the data in local memory. On shutdown, the DMBS copy data from heap to shared memory. This approach is adopted in Scuba as Facebook believed the previous approach gives up usage for lazy allocation.
+
+\textbf{Fast Restarts:} When the DBA initiates restart command, the node halts ingesting updates. The DBMS starts copying data from heap memory to shared memory. The DBMS delete blocks in heap once they are in shared memory. Once all the snapshots are finished, the DBMS restarts. On start up, the DBMS checks to see whether the there is a valid database in shared memory to copy into its heap. If the database in shared memory is invalid (e.g., wrong software version), the DBMS restarts from disk.
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{12-recovery}
+
+\end{document}

@@ -1,0 +1,235 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{08}
+\newcommand{\lecturename}{Trie Data Structures}
+\newcommand{\lecturedata}{2019-02-14}
+\newcommand{\rr}[1]{\textcolor{red}{#1}}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% INDEX IMPLEMENTATION ISSUES
+%% ==================================================================
+\section{Index Implementation Issues}
+Beyond just what type of data structure one uses for an in-memory database index, there are some additional design issues that one must deal with in order to use it in a real DBMS. \rr{We want to make sure our indexes function with other parts of the DBMS and support many application domains.}
+
+%% ----------------------------------------------------
+%% Garbage Collection
+%% ----------------------------------------------------
+\subsection*{Garbage Collection}
+\rr{In latch-free data structures, there are no internal protection mechanism on the nodes. This makes garbage collection challenging since the DBMS does not know which thread would be reading the nodes at any given time that are being modified. If an object is deleted before the pointer has yet to it is updated, then threads accessing the memory location could read garbage data or crash (\texttt{SEGFAULT}). Therefore, we need to know when it is safe to reclaim memory for deleted nodes in a latch-free index. We introduce two mechanisms for garbage collection:}
+
+\textbf{Reference Counting:}
+
+Maintain a counter for each node to keep track of the number of threads that are accessing it.
+\begin{itemize}
+    \item Increment the counter before accessing
+    \item Decrement it when finished
+    \item A node is only safe to delete when the count is zero
+\end{itemize}
+    
+This has bad performance for multi-core CPUs, because changing the counters causes a lot of cache coherence traffic. \rr{As multiple threads are constantly updating the counters, the CPU will send out a lot of cache invalidation messages between different cores to reach synchronization.}
+
+\textbf{Epoch Garbage Collection:} 
+
+\rr{We do not care about the actual value of the reference counter; we only need to know when it reaches zero. Keeping those counters synchronized is useless for the DBMS and introduces overhead}
+
+\rr{There is also no need to perform garbage collection immediately when the counter reaches zero. It can be performed in a later stage with a delay of several milliseconds. Moreover, the size of the data that we are trying to reclaim is not big (usually 1 to 2~KB). Therefore, we do not need fine-grained control over our garbage collection process. Instead, we can opt for a coarse-grained garbage collection method called \textbf{Epoch Garbage Collection}}. Maintain a global epoch counter that is periodically updated (e.g., every 10~ms):
+\begin{itemize}
+    \item
+    Keep track of what threads enter the index during an epoch and when they leave.
+    
+    \item
+    Mark the current epoch of a node when it is marked for deletion.
+    
+    \item
+    The node can be reclaimed once all threads have left that epoch (and all 
+    preceding epochs).
+    
+    \item
+    Also known as \textit{Read-Copy-Update} (RCU) in Linux.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Memory Pools
+%% ----------------------------------------------------
+\subsection*{Memory Pools}
+We do not want threads calling \texttt{malloc} and \texttt{free} anytime that they need to add or delete a node in an index. \rr{Using \texttt{malloc/free} means the DBMS has to invoke the memory allocator that maintains its own data structures and latches, which can become a bottleneck.}
+
+\rr{A solution to this is to create our own memory pool for the DBMS.} If all the nodes are the same size (or a small number of fixed sizes), then the index can maintain a pool of available nodes. 
+\begin{itemize}
+    \item \textbf{Insert:}
+    Grab a free node, otherwise create a new one. \rr{If the pool runs out of the space, we have to call \texttt{malloc} to request more space.}
+    
+    \item \textbf{Delete:}
+    Add the node back to the free pool. We need some policy to decide when to retract the pool size and \rr{return memory to the OS}.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Index Storage
+%% ----------------------------------------------------
+\subsection*{Index Storage}
+\rr{Most discussions of indexes assume that all keys are unique and fixed length. We will discuss how to handle these scenarios as well as how to reduce the amount of redundant data in the context of B+Trees.}
+
+%% ----------------------------------------------------
+%% Non-Unique Keys
+%% ----------------------------------------------------
+\textbf{Non-Unique Keys:}
+
+Every index needs to support non-unique keys~\cite{p203-graefe} \rr{because the same key might be inserted and deleted within the span of different snapshots. However, keep in mind that there are also non-unique indexes that have nothing to do with snapshots. There are two different methods of storing non-unique keys:}
+\begin{itemize}
+    \item \textbf{Duplicate Keys:}
+    \rr{Inside a B+Tree leaf node, store duplicate keys directly in the sorted key array.}
+    \item \textbf{Value Lists:}
+    \rr{Store each key only once and maintain a linked list of unique values. This storage scheme only needs to be used in the leaf nodes, because in the inner nodes the keys will still be unique.}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Variable Length Keys
+%% ----------------------------------------------------
+\textbf{Variable Length Keys:}
+
+Not all keys will be the same length. There are four different ways to store variable-length keys:
+\begin{itemize}
+    \item \textbf{External Pointers:}
+    \rr{Store the keys as pointers to the tuples attributes in the table heap. Not recommended because it introduces a lot of cache miss for every single time the DBMS follows the pointer.}
+    \item \textbf{Variable Length Nodes:}
+    \rr{The size of each node in the index can vary. This is bad in general because for the DBMS, it would need pools for different sizes. As a result, this introduces more fragmented memory that will be hard to manage.}
+    \item \textbf{Padding:}
+    \rr{Always pad the key to the max length of the key type. This wastes space and requires that all keys are the same length of the largest possible key in the index.}
+    \item \textbf{Key Map / Indirection:}
+    \rr{Embed an array of pointer (sorted key map) that map to the key + value list within the node. Think of this as the same as a slotted page in a disk-oriented DBMS. A potential problem with this is that when performing search on the sorted key map, there might be multiple cache line misses because the pointers in the sorted key map point to different locations in the key + value list. This could be improved by embedding some prefix of the key alongside its corresponding pointer.}
+\end{itemize}
+
+
+%% ----------------------------------------------------
+%% Prefix Compression
+%% ----------------------------------------------------
+\textbf{Prefix Compression:}
+
+Since keys are sorted in lexicographical order, there will be a lot duplicated 
+prefixes. To conserve space, store a minimum common prefix that is needed to correctly route probes into the index \rr{and store only the suffix for the keys. This approach is usually adopted in the leaf nodes.}
+
+%% ----------------------------------------------------
+%% Suffix Truncation
+%% ----------------------------------------------------
+\textbf{Suffix Truncation:}
+
+\rr{The keys in the inner nodes are only used to ``direct traffic'', so we do not need the entire key. Store a minimum prefix that is needed to correctly route probes into the index.}
+
+%% ==================================================================
+%% Trie Index, everything is new starting here
+%% ==================================================================
+\section{Trie Index}
+The inner node keys in a B+tree cannot tell whether a key exists in the index. When performing a search, the DBMS always has to traverse to the leaf node because the inner nodes may or may not have keys that exist in the corpus. This means that there would be (at least) one cache line miss per level in the tree.
+
+One solution is to use a digital representation of keys to examine prefixes one-by-one instead of comparing entire key, known as a \textit{Trie / Digital Search Tree / Prefix Tree}.
+
+\textit{Radix tree} is a vertically-compressed trie; it omits all nodes with only a single child and merges them with their parent. It is also known as Patricia Tree.
+
+\textbf{Shape:} The shape of a trie only depends on key space and lengths. Compared to a B+Tree where shuffling the keys and inserting in them in a different order might produce different shapes for the tree, a trie has a deterministic shape given the same data set. It does not depend on existing keys or insertion order. It also does not require re-balancing operations, but might need split and merge operations.
+
+\textbf{Operation Complexity:} Operations have $O(k)$ complexity where $k$ is the length of the key. The path to a leaf node represents the key of the leaf. Keys are not stored in their entire form at any node in the trie; they are stored implicitly and can be reconstructed from paths.
+
+\textbf{Key Span:} The span of a trie level is the number of bits that each partial key / digit represents. If the digit exists in the corpus, then we store a pointer to the next level in the trie branch if it exists. Otherwise, we store a null pointer. The span determines the \textit{fan-out} (number of branches, $n$-way trie = fan-out of $n$) of each node and the physical height of the tree. 
+
+%% ==================================================================
+%% Judy Arrays
+%% ==================================================================
+\section{Judy Arrays}
+
+Judy Arrays~\cite{7113370} are a variant of a 256-way radix tree created and patented by HP in 2000. An open-source implementation (LGPL) is also available. It is the first known radix tree that supports adaptive node representation, where each node in the Judy Array is categorized based on its contents.
+There are three arrays types:
+\begin{itemize}
+    \item Judy1: Bit array that maps integer keys to true/false.
+    \item JudyL: Map integer keys to integer values.
+    \item JudySL: Map variable-length keys to integer values.
+\end{itemize}
+
+Instead of storing meta-data about the node in its header, Judy Arrays pack meta-data about a node in 128-bit ``\textit{Judy Pointers}" stored in its parent node:
+\begin{itemize}
+    \item Node Type
+    \item Population Count
+    \item Child Key Prefix / Value (if only one child below)
+    \item 64-bit Child Pointer
+\end{itemize}
+Storing meta-data about a node in its parent node is possible because in a radix tree, every child node only has one parent node.
+
+\subsection*{Node Types}
+Every node in a Judy Array can store up to 256 digits (256-way trie). All the nodes will not be 100\% full. For instance, it is possible that in lower levels of the trie, the fan-out gets larger and there are more keys, but in upper levels the fan-out is smaller. Based on the distribution of population of the digit at a node, there are three categories of node types:
+\begin{itemize}
+    \item \textbf{Linear Node:} Used for sparse population. Stores two arrays in the node that can store up to six digits. One ($6\times1$ bytes) stores sorted list of partial prefixes; the other one ($6\times16$ bytes) stores separate array of pointers to children ordered according to prefix sorted. A linear node uses up to two cache lines (originally one cache line).
+    \item \textbf{Bitmap Node:} Used for typical population. Maintains a 256-bit map to mark whether a prefix is present in node. The bitmap is divided into eight segments, each with a pointer to a sub-array with pointers to child nodes.
+    \item \textbf{Uncompressed Node:} Used for dense population. Stores an array of pointers to child nodes where the digits exist.
+\end{itemize}
+
+%% ==================================================================
+%% ART Index
+%% ==================================================================
+\section{ART Index}
+Another variant of the radix tree is ART (Adaptive Radix Tree) Index~\cite{leis-icde2013}. It is developed for TUM's HyPer DBMS in 2013. ART is a 256-way radix tree that also supports different node types based on its population.
+\begin{itemize}
+    \item \textbf{Node Meta-data:} Judy stores meta-data with the node itself; ART stores meta-data in the node's header.
+    \item \textbf{Node Types:} Judy has three node types with different organizations; ART has four node types that vary in the maximum number of children.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Node Types
+%% ----------------------------------------------------
+\subsection*{Node Types}
+\begin{itemize}
+    \item \textbf{Node4, Node16:} Used for small nodes. Store only the 8-bit digits that exist at a given node in a sorted array. The offset in sorted digit array corresponds to offset in value array. Node4 can store at most 4 values ($4\times1 + 4\times8$ bytes), Node16 can store at most 16 values ($16\times1 + 16\times8$ bytes). 
+    \item \textbf{Node48:} Used for medium nodes. Instead of storing 1-byte digits, maintain an array of 1-byte offsets ($256\times1$ bytes) to a child pointer array that is indexed on the digit bits. Max number of entries that can be stored in this node is 48 ($48\times8$ bytes). In total, Node48 uses $640$ bytes.
+    \item \textbf{Node256:} Used for large nodes. Store an array of 256 pointers to child nodes ($256\times8$ bytes). This covers all possible values in 8-bit digits. This is the same as Judy's Uncompressed Node.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Binary Comparable Keys
+%% ----------------------------------------------------
+\subsection*{Binary Comparable Keys}
+The way that a CPU represents different data types is not amenable for storage in a trie data structure. For instance, Intel x86 is little endian, but we want to store keys as big endian so that the more discriminate bits are evaluated first. As a result, not all attribute types can be decomposed into binary comparable digits and we need to make adjustments different types of keys when performing comparisons.
+\begin{itemize}
+    \item \textbf{Unsigned Integers:} Byte order is reversed for little endian machines.
+    \item \textbf{Signed Integers:} Flip two’s-complement so that negative numbers are smaller than positive.
+    \item \textbf{Floats:} Classify into group (neg vs. pos, normalized vs. denormalized), then store as unsigned integer.
+    \item \textbf{Compound Keys:} Transform each attribute to comparable form separately and concatenate them as a long key.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Concurrent ART Index
+%% ----------------------------------------------------
+\subsection*{Concurrent ART Index}
+ART proposes two approaches to support concurrent index operations~\cite{Leis}:
+\begin{itemize}
+    \item \textbf{Optimistic Lock Coupling:} Use an optimistic crabbing scheme where writers are not blocked on readers. Every node now has a version number (counter). Writers increment a node's counter when they acquire the latch for that node. Readers proceed if a node's latch is available but do not acquire it. Readers then check whether the latch's counter has changed from when it checked the latch. If the counter has not changed, then the reader knows that no other thread has modified the node. This approach relies on epoch GC to ensure pointers are valid. This is because we do not want writer threads to deallocate nodes when performing deletes or splits and merges, which can cause reader threads to follow invalid pointers.
+    \item \textbf{Read-Optimized Write Exclusion:} Each node includes an exclusive latch that blocks only other writers and not readers. Readers proceed without checking versions or latches. Every writer must ensure that reads are always consistent. This approach requires fundamental changes to how threads make modifications to the data structure; creating new nodes means that we have to atomically update pointers from other nodes (see Bw-Tree). This is not problem in a radix tree because there is only one parent pointing to the node of interest. However in a B+Tree, a nodes can have sibling pointers pointing to the node and an update requires the DBMS to utilize latches.
+\end{itemize}
+HyPer's ART is not latch-free. The authors of ART believe it would take a significant amount of extra work to make ART latch-free and is not worth the effort.
+
+%% ----------------------------------------------------
+%% ART vs. Judy
+%% ----------------------------------------------------
+\subsection*{ART vs. Judy}
+Judy is a general-purpose associative array, which means it has the complete copy of a key in the array. On the other hand, ART is a table index and does not need to cover the full keys; values in ART are pointers to tuples. The DBMS does not need to worry about losing keys when it truncate the branches. It can always go back to the actual table itself and rebuild the index if needed.
+
+%% ==================================================================
+%% Masstree
+%% ==================================================================
+\section{Masstree}
+Judy Arrays and ART use different storage schemes per node based on the size of each trie node and the key distribution. An alternative approach is to use dynamic nodes that can grow and shrink based on the the population as needed. 
+
+\textbf{MassTree}~\cite{Mao:2012:CCF:2168836.2168855} is created as part of the Harvard Silo project in 2012. It uses an entire B+Tree as a node (``trie of trees'') that is optimized for long keys (e.g., url, email address). Each B+tree in the trie represents a 8-byte span. It uses a latching scheme similar to Optimistic Lock Coupling~\cite{Leis}.
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{08-oltpindexes2}
+
+\end{document}
