@@ -117,13 +117,13 @@ The DBMS decides how many threads to use to execute the query when it generates 
 
 This approach assumes the data is uniformly-distributed; each socket is expected to have the same amount of work. However, in practice, there are often discrepancies between the amount of work executed on each socket.
 
-\subsection*{Morsel-Driven Scheduling}
+\subsection*{Morsel-Driven Scheduling~\cite{10.1145/2588555.2610507}}
 The DBMS dynamically schedules tasks that operate over horizontal partitions called "morsels" that are distributed across cores. This approach uses one worker per CPU core, pull-based task assignment and round-robin data placement across the sockets. It also supports parallel, NUMA-aware operator implementations.
 
 \subsection*{Hyper (Work Stealing)}
 In Hyper, the DBMS uses pull-based task assignment instead of separated dispatcher threads. The threads perform cooperative scheduling for each query plan using a single task queue. Each worker tries to select tasks that will execute on morsels that are local to it. If there are no local tasks, then the worker just pulls the next task from the global work queue.
 
-\subsection*{SAP HANA (NUMA-Aware Scheduler)}
+\subsection*{SAP HANA (NUMA-Aware Scheduler)~\cite{10.14778/2824032.2824043}}
 Because there is only one worker per core, Hyper has to use work stealing because otherwise threads could sit idle waiting for stragglers. A solution to this is to use a lock-free hash table to maintain the global work queues.
 
 SAP HANA uses pull-based scheduling with multiple worker threads that are organized into groups (pools). This NUMA-Aware Scheduler can dynamically adjust thread pinning based on whether a task is CPU memory bound. Each CPU can have multiple groups, and each group has a soft and hard priority queue. The DBMS uses a separate “watchdog” thread to check whether groups are saturated and can reassign tasks dynamically.
