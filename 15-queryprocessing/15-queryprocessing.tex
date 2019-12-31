@@ -1,0 +1,136 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{15}
+\newcommand{\lecturename}{Query Execution \& Processing}
+\newcommand{\lecturedata}{2018-03-05}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% Operator Execution
+%% ==================================================================
+\section{Operator Execution}
+Operator execution focuses on the problem of efficiently executing some components and operators of a query plan. The methods to make the queries run fast include \textbf{Query Plan Processing} (this lecture), \textbf{Application Logic Execution} (UDFs), \textbf{Parallel Join Algorithms}, \textbf{Vectorized Operators}, and \textbf{Query Compilation}.
+
+%% ----------------------------------------------------
+%% Optimization Goals
+%% ----------------------------------------------------
+\subsection*{Optimization Goals}
+There are three goals of speeding up the queries:
+\begin{itemize}
+    \item \textbf{Reduce Instruction Count}: Use fewer instructions to do the same amount of work. Usually we achieve the goal by specializing or organizing the code.
+    \item \textbf{Reduce Cycles per Instruction}: Execute more CPU instructions in fewer cycles. This means to maximize locality by reducing cache misses and stalls due to memory load/stores.
+    \item \textbf{Parallelize Execution}: Use multiple threads to compute each query in parallel.
+\end{itemize}
+
+%% ==================================================================
+%% MonetDB/X100
+%% ==================================================================
+\section{MonetDB/X100 Analysis}
+The paper by Boncz et al~\cite{DBLP:conf/cidr/BonczZN05} provides a low-level analysis of execution bottlenecks for in-memory DBMSs on OLAP workloads, showing how DBMSs are designed incorrectly for modern CPU architectures. Based on these findings, they proposed a new DBMS called MonetDB/X100. It was renamed to Vectorwise and acquired by Actian in 2010. It was later rebranded as Vector and Avalance.
+
+%% ----------------------------------------------------
+%% CPU Overview
+%% ----------------------------------------------------
+\subsection*{CPU Overview}
+To better understand how databases work, we need to know how CPUs deal with some problems. CPUs organize instructions into \textbf{pipeline stages}, whose goal is to keep all parts of the processor busy at each cycle by masking delays from instructions that cannot complete in a single cycle. Super-scalar CPUs support multiple pipelines. They can execute multiple instructions in parallel in a single cycle if the instructions are independent. It's categorized as Single Instruction stream, Single Data stream (SISD) in Flynn's Taxonomy.
+
+\subsection*{DBMS/CPU Problems}
+For DBMSs, there are two problems with CPU pipe lining. 
+
+\textbf{Dependencies}: If one instruction depends on another instruction, then it cannot be pushed immediately into the same pipeline. 
+
+\textbf{Branch Prediction}: The CPU tries to predict what branch the program will take and fill in the pipeline with its instructions. If it gets it wrong, it has to throw away any speculative work and flush the pipeline. 
+\begin{itemize}
+    \item \textbf{Branch Misprediction}: In a DBMS, the most executed branching code is the filter operation during a sequential scan. But this is (nearly) impossible to predict correctly. For example, implementing selection scan without branching may gain better performance than with branching.
+    \item \textbf{Excessive Instructions}: The DBMS needs to support different data types, so it must check a value's type before it performs any operation on that value. This is usually implemented as giant switch statements, which create more branches that can be difficult for the CPU to predict reliably. One example is Postgres' addition for NUMERIC types.
+\end{itemize}
+
+%% ==================================================================
+%% Processing Model 
+%% ==================================================================
+\section{Processing Model}
+A DBMS's processing model defines how the system executes a query plan. There are Different trade-offs for different workloads. In addition, there are two \textbf{Plan Processing Directions}: 1. \textbf{Top-to-Bottom}: Start with the root and "pull" data up from its children. Tuples are always passed with function calls. 2. \textbf{Bottom-to-Top}: Start with leaf nodes and push data to their parents.
+This approach allows for tighter control of caches/registers in pipelines.
+
+%% ----------------------------------------------------
+%% Iterator Model
+%% ----------------------------------------------------
+\subsection*{Iterator Model}
+Iterator model is also called \textbf{Volcano} or \textbf{Pipeline} Model. Each query plan operator implements a next function. On each invocation, the operator returns either a single tuple or a null marker if there are no more tuples. The operator implements a loop that calls next on its children to retrieve their tuples and then process them.
+
+This is used in almost every DBMS as a general approach. It allows for tuple pipe lining, but some operators have to block until their children emit all of their tuples, such as Joins, Subqueries, and Order By. Output control works easily with this approach.
+
+%% ----------------------------------------------------
+%% Materialization Model
+%% ----------------------------------------------------
+\subsection*{Materialization Model}
+In materialization model, each operator processes its input all at once and
+then emits its output all at once. The operator "materializes" its output as a single result. The DBMS can push down hints to avoid scanning too many tuples. The output can be either whole tuples (NSM) or subsets of columns (DSM). 
+
+Since this approach has lower execution / coordination overhead and fewer function calls, it is good for OLTP workloads as the  queries only access a small number of tuples at a time. On the other hand, it is not good for OLAP queries with large
+intermediate results.
+
+%% ----------------------------------------------------
+%% Vectorized / Batch Model
+%% ----------------------------------------------------
+\subsection*{Vectorized / Batch Model}
+In vectorized model, each operator implements a next function like the iterator model but emits a batch of tuples instead of a single one. The operator's internal loop processes multiple tuples at a time. The size of the batch can vary based on hardware or query properties.
+
+Vectorized model is considered ideal for OLAP queries because it greatly reduces
+the number of invocations per operator. It allows for operators to use vectorized (SIMD) instructions to process batches of tuples.
+
+
+%% ==================================================================
+%% Parallel Execution
+%% ==================================================================
+\section{Parallel Execution}
+We will discuss two types of parallelisms:
+%% ----------------------------------------------------
+%% Inter-Query Parallelism
+%% ----------------------------------------------------
+\subsection*{Inter-Query Parallelism}
+Inter-Query Parallelism improves overall performance by allowing multiple queries to execute simultaneously. It provides the illusion of isolation through concurrency control scheme. The difficulty of implementing a concurrency control scheme is not significantly affected by the DBMS’s process model.
+
+%% ----------------------------------------------------
+%% Intra-Query Parallelism
+%% ----------------------------------------------------
+\subsection*{Intra-Query Parallelism}
+Intra-Query Parallelism improves the performance of a single query by executing its operators in parallel. There are two approaches which are not mutually exclusive. And there are parallel algorithms for every relational operator.
+\begin{itemize}
+    \item \textbf{Intra-Operator (Horizontal)}\\
+    Operators are decomposed into independent instances that perform the same function on different subsets of data. The DBMS inserts an exchange operator into the query plan to coalesce results from children operators.
+    \item \textbf{Inter-Operator (Vertical)}\\
+    Operations are overlapped in order to pipeline data from one stage to the next without materialization. The technique is also called \textbf{pipelined parallelism}. As far as Andy knows, this approach is not widely used in traditional relational DBMSs since not all operators can emit output until they have seen all of the tuples from their children. It is more common in \textbf{stream processing} systems such as kafka and Apache Spark.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Worker Allocation
+%% ----------------------------------------------------
+\subsection*{Worker Allocation}
+Coming up with the right number of workers to use for a query plan depends on the number of CPU cores, the size of the data, and functionality of the operators. We may assign \textbf{One Worker per Core}, where each core is assigned one thread that is pinned to that core in the OS, or \textbf{Multiple Workers per Core}, which uses a pool of workers per core (or per socket) to allow CPU cores to be fully utilized in case one worker at a core blocks.
+
+%% ----------------------------------------------------
+%% Task Assignment
+%% ----------------------------------------------------
+\subsection*{Task Assignment}
+There are two ways for task assignments:
+\begin{itemize}
+    \item \textbf{Push}: This method uses a centralized dispatcher to assign tasks to workers and monitors their progress. When the worker notifies the dispatcher that it is finished, it is given a new task.
+    \item \textbf{Pull}: In this approach, workers pull the next task from a queue, process it, and then return to get the next task.
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{15-queryprocessing}
+
+\end{document}
+
