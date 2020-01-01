@@ -1,0 +1,297 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{03}
+\newcommand{\lecturename}{Query Compilation}
+\newcommand{\lecturedata}{2018-01-24}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% BACKGROUND
+%% ==================================================================
+\section{Background}
+After switching to an in-memory DBMS, the only ways to increase throughput is to reduce the 
+number of instructions executed~\cite{freedman14}:
+\begin{itemize}
+    \item
+    To go 10$\times$ faster, the DBMS must execute 90\% fewer instructions.
+    
+    \item
+    To go 100$\times$ faster, the DBMS must execute 99\% fewer instructions.
+\end{itemize}
+    
+One way to achieve such a reduction is through \textit{code specialization}. This means generating 
+code that is specific to a particular task in the DBMS (e.g., a specific query).
+
+%% ==================================================================
+%% QUERY PROCESSING
+%% ==================================================================
+\section{Query Processing}
+There are three ways for a DBMS to execute a query plan:
+\begin{itemize}
+    \item \textbf{Tuple-at-a-time}:
+    Each operator calls \textbf{next} on their child to get the next tuple to process. 
+    Also known as the \textit{Volcano}~\cite{graefe94} iterator model. \\
+    Example: This is the approach used by most DBMSs.
+    
+    \item \textbf{Operator-at-a-time}:
+    Each operator materializes their entire output for their parent operator.
+    This approach is ideal for in-memory OLTP engines because it reduces the number of function 
+    calls and the number of tuples emitted per operator is small. \\
+    Example: H-Store/VoltDB, MonetDB.
+    
+    \item \textbf{Vector-at-a-time}:
+    Each operator calls \textbf{next} on their child to get the next \textbf{batch} of data to 
+    process. \\
+    Example: VectorWise~\cite{bonc05}, Peloton~\cite{menon17}.
+\end{itemize}
+    
+Predicate Interpretation:
+\begin{itemize}
+    \item
+    DBMS evaluates predicates using an expression tree.
+    
+    \item
+    Expression trees are expensive to interpret when a query accesses a lot of tuples.
+\end{itemize}
+
+%% ==================================================================
+%% CODE SPECIALIZATION
+%% ==================================================================
+\section{Code Specialization}
+Any CPU intensive entity of database can be natively compiled if they have a similar 
+execution pattern on different inputs.
+\begin{itemize}
+    \item Access methods
+    \item Stored procedure
+    \item Operator execution
+    \item Predicate evaluation
+    \item Logging operations
+\end{itemize}
+    
+Benefits of Code Specialization:
+\begin{itemize}
+    \item
+    Attribute types are knwon \textit{a priori}; data access function calls can be converted to 
+    inline pointer casting.
+    
+    \item
+    Predicates are known \textit{a priori}; the DBMS can evaluate them using primitive 
+    data comparisons.
+    
+    \item
+    No function calls in loops; this allows the compiler to efficiently distribute data to 
+    registers and increase cache reuse.
+    
+    \item
+    All possible because relational DBMSs have schemas.
+\end{itemize}
+
+%% ==================================================================
+%% CODE GENERATION
+%% ==================================================================
+\section{Code Generation}
+
+%% ----------------------------------------------------
+%% Transpilation
+%% ----------------------------------------------------
+\subsection*{Approach \#1 -- Transpilation (Source-to-Source Compilation)}
+Write code that converts a relational query plan into 
+C/C++ and then run it through a conventional compiler to generate native 
+code~\cite{krikellas10}:
+\begin{itemize}
+    \item
+    For a given query plan, generate a C/C++ program that implements that query's execution.
+    
+    \item
+    Use an off-shelf compiler (e.g., \texttt{gcc}) to convert the code into a shared object, 
+    link it to the DBMS process, and invoke the exec function to execute the query.
+    
+    \item
+    The generated query code can invoke any other function in the DMBS.
+    
+    \item
+    This allows it to use all the same components as interpreted queries (e.g. 
+    concurrency control, logging/checkpoints).
+    
+    \item
+    The evaluation of the HIQUE~\cite{krikellas10} system shows that the DBMS incurs fewer 
+    memory stalls when executing the query but the compilation time is long (i.e., 
+    greater than 100-600~ms).
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% JIT Compilation
+%% ----------------------------------------------------
+\subsection*{Approach \#2 - JIT Compilation}
+Generate an intermediate representation (IR) of the query that can be quickly compiled into 
+native code~\cite{neumann11}.
+
+\begin{itemize}
+    \item
+    Organizes query processing in a way to keep a tuple in CPU registers for as long as 
+    possible. The query plan is divided into pipelines (i.e., how far up the query tree 
+    the DBMS can continue processing a tuple before needing the next tuple becomes necessary).
+    \begin{itemize}
+        \item
+        Push-based vs. Pull-based
+        
+        \item
+        Data-Centric vs. Operator-Centric
+    \end{itemize}
+    
+    \item
+    The DBMS can compile queries into native code using the LLVM toolkit~\cite{lattner04}:
+    \begin{itemize}
+        \item
+        Collection of modular and reusable compiler and toolchain technologies.
+        
+        \item
+        Core component is a low-level programming language (IR) that is similar to assembly.
+        
+        \item
+        Not all of the DBMS components need to be written in LLVM IR. The LLVM code can 
+        make calls to C++ code.
+    \end{itemize}
+    
+    \item Query Compilation Cost:
+    \begin{itemize}
+        \item
+        LLVM compilation time grows super-linearly relative to the query size (\# of joins, 
+        predicates, and aggregations).
+        
+        \item
+        Not a big issues with OLTP applications. Major problem with OLAP workloads.
+    \end{itemize}
+\end{itemize}
+        
+One solution to mask the compilation time is HyPer's \textit{Adaptive Execution} 
+model~\cite{kohn18}:
+\begin{enumerate}
+    \item
+    First generate the LLVM IR for the query.
+    
+    \item
+    Execute the IR in an interpreter while compiling the query in a background thread.
+    
+    \item
+    When the compiled query is ready, seamlesly replace the interpretive execution.
+\end{enumerate}
+
+%% ==================================================================
+%% REAL WORLD IMPLEMENTATIONS
+%% ==================================================================
+\section{Real World Implementations}
+\begin{itemize}
+    \item \dbSys{IBM System R}~\cite{chamberlin81}
+    \begin{itemize}
+        \item
+        A primitive form of code generation and query compilation was used by IBM in 1970s.
+        
+        \item
+        Compiled SQL statements into assembly code by selecting code templates for each 
+        operator.
+        
+        \item
+        Technique was abandoned when IBM built \dbSys{DB2} in the 1980s.
+    \end{itemize}
+    
+    \item \dbSys{Oracle}
+    \begin{itemize}
+        \item
+        Convert PL/SQL stored procedures into \texttt{Pro*C} code and then compiled into native 
+        C/C++ code.
+        
+        \item
+        They also put Oracle-specific operations directly in the SPARC chips as co-processors.
+    \end{itemize}
+    
+    \item \dbSys{Microsoft Hekaton}~\cite{freedman14}
+    \begin{itemize}
+        \item
+        Can compile both procedures and SQL.
+        
+        \item
+        Non-Hekaton queries can access Hekaton tables through compiled inter-operators.
+        
+        \item
+        Generates C code from an imperative syntax tree, compiles it into DDL, and links at 
+        runtime.
+    \end{itemize}
+    
+    \item \textbf{Cloudera Impala}~\cite{kornacker15}
+    \begin{itemize}
+        \item
+        LLVM JIT compilation for predicate evaluation and record parsing.
+        
+        \item
+        Optimized record parsing is important for Impala because they need to handle multiple 
+        data formats stored on HDFS.
+    \end{itemize}
+    
+    \item \dbSys{Actian Vector} (formerly \dbSys{VectorWise})~\cite{raducanu13}
+    \begin{itemize}
+        \item
+        Pre-compile thousands of ``primitives'' that perform basic operations on typed data.
+        
+        \item
+        The DBMS then executes a query plan that invokes these primitives at runtime.
+    \end{itemize}
+    
+    \item \dbSys{MemSQL} (pre-2016)
+    \begin{itemize}
+        \item
+        Performs the same C/C++ code generation as HIQUE~\cite{krikellas10} and then invokes 
+        \texttt{gcc}.
+        
+        \item
+        Converts all queries into a parameterized form and caches the compiled query plan.
+    \end{itemize}
+
+    \item \dbSys{MemSQL} (Since 2016)
+    \begin{itemize}
+        \item A query plan is converted into an imperative plan expressed in a high-level imperative DSL
+        \item MemSQL Programming Language (MLP), think of it like a C++ dialect
+        \item The DSL then gets executed into a second language of opcodes
+        \item Finally the DBMS compiles the opcodes into LLVM IR and then to native code
+    \end{itemize}
+    \item VitesseDB
+    \begin{itemize}
+        \item Query accelerator for Postgres/Greenplum that uses LLVM + intra-query parallelism
+        \item JIT Predicates
+    \end{itemize}
+    \item Apache Spark
+    \begin{itemize}
+        \item Introduced in the new Tungsten engine in 2015
+        \item The system converts a query's WHERE clause expression trees into AST
+        \item It then compiles these ASTs to generate JVM bytecode, which is then executed natively
+    \end{itemize}
+    \item Peloton
+    \begin{itemize}
+        \item Full compilation of the entire query plan
+        \item Relax the pipeline breakers of HyPEr to create mini-batches for operators that can be vectorized
+        \item Use software pre-fetching to hide memory stalls
+    \end{itemize}
+\end{itemize}
+
+\section{Conclusion}
+\begin{itemize}
+    \item Query compilation makes a difference but is non-trivial to implement
+    \item The 2016 version of MemSQL is the best query compilation implementation out there
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{03-compilation}
+
+
+
+\end{document}
