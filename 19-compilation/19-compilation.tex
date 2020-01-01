@@ -1,6 +1,6 @@
 \documentclass[11pt]{article}
 
-\newcommand{\lecturenumber}{03}
+\newcommand{\lecturenumber}{19}
 \newcommand{\lecturename}{Query Compilation}
 \newcommand{\lecturedata}{2018-01-24}
 
@@ -43,12 +43,12 @@ There are three ways for a DBMS to execute a query plan:
     Each operator materializes their entire output for their parent operator.
     This approach is ideal for in-memory OLTP engines because it reduces the number of function 
     calls and the number of tuples emitted per operator is small. \\
-    Example: H-Store/VoltDB, MonetDB.
+    Example: \dbSys{H-Store}/\dbSys{VoltDB}, \dbSys{MonetDB}.
     
     \item \textbf{Vector-at-a-time}:
     Each operator calls \textbf{next} on their child to get the next \textbf{batch} of data to 
     process. \\
-    Example: VectorWise~\cite{bonc05}, Peloton~\cite{menon17}.
+    Example: \dbSys{VectorWise}~\cite{bonc05}, \dbSys{Peloton}~\cite{menon17}.
 \end{itemize}
     
 Predicate Interpretation:
@@ -97,6 +97,8 @@ Benefits of Code Specialization:
 %% ==================================================================
 \section{Code Generation}
 
+\todo{Need intro paragraph.}
+
 %% ----------------------------------------------------
 %% Transpilation
 %% ----------------------------------------------------
@@ -120,9 +122,9 @@ code~\cite{krikellas10}:
     concurrency control, logging/checkpoints).
     
     \item
-    The evaluation of the HIQUE~\cite{krikellas10} system shows that the DBMS incurs fewer 
+    The evaluation of the \dbSys{HIQUE}~\cite{krikellas10} system shows that the DBMS incurs fewer 
     memory stalls when executing the query but the compilation time is long (i.e., 
-    greater than 100-600~ms).
+    greater than 100--600~ms).
 \end{itemize}
     
 %% ----------------------------------------------------
@@ -170,7 +172,7 @@ native code~\cite{neumann11}.
     \end{itemize}
 \end{itemize}
         
-One solution to mask the compilation time is HyPer's \textit{Adaptive Execution} 
+One solution to mask the compilation time is \dbSys{HyPer}'s \textit{Adaptive Execution} 
 model~\cite{kohn18}:
 \begin{enumerate}
     \item
@@ -260,9 +262,10 @@ model~\cite{kohn18}:
         \item The DSL then gets executed into a second language of opcodes
         \item Finally the DBMS compiles the opcodes into LLVM IR and then to native code
     \end{itemize}
-    \item VitesseDB
+    \item \dbSys{VitesseDB}
     \begin{itemize}
-        \item Query accelerator for Postgres/Greenplum that uses LLVM + intra-query parallelism
+        \item Query accelerator for \dbSys{Postgres}/\dbSys{Greenplum} that uses LLVM + intra-query 
+parallelism
         \item JIT Predicates
     \end{itemize}
     \item Apache Spark
@@ -271,7 +274,7 @@ model~\cite{kohn18}:
         \item The system converts a query's WHERE clause expression trees into AST
         \item It then compiles these ASTs to generate JVM bytecode, which is then executed natively
     \end{itemize}
-    \item Peloton
+    \item \dbSys{Peloton}
     \begin{itemize}
         \item Full compilation of the entire query plan
         \item Relax the pipeline breakers of HyPEr to create mini-batches for operators that can be vectorized
@@ -279,18 +282,13 @@ model~\cite{kohn18}:
     \end{itemize}
 \end{itemize}
 
-\section{Conclusion}
-\begin{itemize}
-    \item Query compilation makes a difference but is non-trivial to implement
-    \item The 2016 version of MemSQL is the best query compilation implementation out there
-\end{itemize}
 
 % ==================================================================
 % BIBLIOGRAPHY
 % ==================================================================
 \newpage
 \bibliographystyle{abbrvnat}
-\bibliography{03-compilation}
+\bibliography{19-compilation}
 
 
 
