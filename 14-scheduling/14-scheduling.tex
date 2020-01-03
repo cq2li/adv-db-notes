@@ -188,7 +188,7 @@ executed on each socket.
 %% ----------------------------------------------------
 \subsection*{HyPer: Morsel-Driven Scheduling}
 The DBMS dynamically schedules tasks that operate over horizontal partitions called "morsels" that 
-are distributed across cores~\cite{10.1145/2588555.2610507}. This approach uses one worker per CPU 
+are distributed across cores~\cite{Leis2014}. This approach uses one worker per CPU 
 core, pull-based task assignment and round-robin data placement across the sockets. It also supports 
 parallel, NUMA-aware operator implementations.
 
@@ -206,7 +206,7 @@ threads could sit idle waiting for stragglers. A solution to this is to use a lo
 to maintain the global work queues.
 
 \dbSys{SAP HANA} uses pull-based scheduling with multiple worker threads that are organized into 
-\textit{thread groups} (i.e., pools)~\cite{10.14778/2824032.2824043}. This NUMA-Aware Scheduler 
+\textit{thread groups} (i.e., pools)~\cite{Psaroudakis2015}. This NUMA-Aware Scheduler 
 can dynamically adjust thread pinning based on whether a task is CPU memory bound. Each CPU can have 
 multiple groups, and each group has a soft and hard priority queue. The DBMS uses a separate 
 ``watchdog'' thread to check whether groups are saturated and can reassign tasks dynamically.
