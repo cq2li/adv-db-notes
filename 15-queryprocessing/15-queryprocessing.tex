@@ -26,7 +26,7 @@ There are three techniques of speeding up the queries:
 \begin{itemize}
     \item \textbf{Reduce Instruction Count}: 
     Use fewer instructions to do the same amount of work. 
-    Usually by specializing or organizing the code to reduce the amount of instructions to execute 
+    Usually by specializing or organizing the code to reduce the number of instructions to execute 
     the operators. 
     \item \textbf{Reduce Cycles per Instruction}: 
     Execute more CPU instructions in fewer cycles. 
@@ -91,7 +91,7 @@ trade-offs for different workloads. In addition, there are two plan processing d
 %% Iterator Model
 %% ----------------------------------------------------
 \subsection*{Iterator Model}
-The iterator model is also called \textbf{Volcano} or \textbf{Pipeline} Model. Each query plan 
+The iterator model is also called the \textbf{Volcano} or \textbf{Pipeline} Model. Each query plan 
 operator implements a next function. On each invocation of the next function, the operator returns 
 either a single tuple or a null marker if there are no more tuples. The operator implements a loop 
 that calls next on its children to retrieve their tuples and then process them.
@@ -121,8 +121,8 @@ In the vectorized model, each operator implements a next function like the itera
 a batch of tuples instead of a single one. The operator's internal loop processes multiple tuples 
 at a time. The size of the batch can vary based on hardware or query properties.
 
-Vectorized model is considered ideal for OLAP queries because it greatly reduces the number of 
-invocations per operator. It allows for operators to use vectorized (SIMD) instructions to process 
+The vectorized model is considered ideal for OLAP queries because it greatly reduces the number of 
+invocations per operator. It allows operators to use vectorized (SIMD) instructions to process 
 batches of tuples.
 
 
@@ -135,7 +135,7 @@ There are two types of parallelisms:
 %% Inter-Query Parallelism
 %% ----------------------------------------------------
 \subsection*{Inter-Query Parallelism}
-Inter-Query Parallelism improves overall performance of query execution by allowing multiple 
+Inter-Query Parallelism improves the overall performance of query execution by allowing multiple 
 queries to execute simultaneously. It provides the illusion of isolation through concurrency 
 control scheme. The difficulty of implementing a concurrency control scheme is not significantly 
 affected by the DBMS’s process model.
@@ -164,7 +164,7 @@ parallel. There are two approaches that are not mutually exclusive.
 %% ==================================================================
 \section*{Worker Allocation}
 Determining the right number of workers to use for a query plan depends on the number of CPU 
-cores, the size of the data, and functionality of the operators. 
+cores, the size of the data, and the functionality of the operators. 
 We may assign \textbf{One Worker per Core}, where each core is assigned one thread that is pinned 
 to that core in the OS, or \textbf{Multiple Workers per Core}, which uses a pool of workers per 
 core (or per socket) to fully utilize CPU cores in case one worker at a core blocks.
