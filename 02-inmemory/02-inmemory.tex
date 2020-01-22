@@ -1,0 +1,364 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{02}
+\newcommand{\lecturename}{In-Memory Databases}
+\newcommand{\lecturedata}{2020-01-15}
+
+\usepackage{../dbnotes}
+\usepackage{xcolor}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% BACKGROUND
+%% ==================================================================
+\section{Background}
+The history of DBMSs development is about dealing with the limitations of hardware.
+The first DBMSs in the 1970s were designed in environment with the following characteristics:
+\begin{itemize}
+    \item Uniprocessor (single core CPU)
+    \item RAM was severely limited
+    \item Database had to be stored on disk
+    \item Disk is slow. \textbf{Seriously slow}
+\end{itemize}
+   
+But now DRAM capacities are large and inexpensive enough that most structured databases 
+(gigabytes/low terabytes) will entirely fit in memory. This merits us to rethink all aspects of 
+the DBMS to account for this. This course is about ways to 
+do this.
+
+%% ==================================================================
+%% DISK-ORIENTED DATABASE MANAGEMENT SYSTEMS
+%% ==================================================================
+\section{Disk-Oriented Database Management Systems}
+For a disk oriented DBMS, the system architecture is predicated on the assumption that data 
+is stored in non-volatile memory. This means that the DBMS may have to read data from disk during 
+query execution.
+
+In a disk-based system, only approximately 7\% of instructions are for the execution of 
+transaction logic in OLTP workloads~\cite{harizopoulos08}. The majority of the DBMS's 
+instructions time are in managing 
+three of its key components: (1) buffer pool, (2) concurrency control, (3) logging/recovery.
+
+%% ----------------------------------------------------
+%% Buffer Pool
+%% ----------------------------------------------------
+\subsection*{Buffer Pool}
+The DBMS organizes the database as a set of fixed-length blocks called \textit{slotted pages}.
+The system uses an in-memory (volatile) \textit{buffer pool} to cache the blocks cached from disk.
+
+\begin{itemize}
+    \item
+    When a query accesses a page, the DBMS checks to see if that page is already in memory.
+        
+    \item
+    If not, the DBMS retrieves the memory from disk and copies it into a frame in its 
+    buffer pool. A pointer to the frame is returned for further operations.
+    
+    \item If there is no free frame to store the new page, DBMS finds a page to evict.
+    If the evicted page is dirty, DBMS writes it on disk.
+        
+    \item
+    Once the page is in memory, the DBMS translates any on-disk addresses to their 
+    in-memory addresses.
+        
+    \item
+    Every tuple access has to go through the buffer pool manager regardless of whether 
+    that data will always be in memory. Even if we provide the DBMS with large enough
+    memory to store the entire database in memory, these operations still occur.
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Concurrency Control
+%% ----------------------------------------------------
+\subsection*{Concurrency Control}
+In a disk oriented DBMS, the system assumes that a transaction could stall at any time when 
+it tries to access data that is not in memory.
+        
+The system's concurrency control protocol allows the DBMS to execute other transactions at 
+the same time to improve performance while still preserving atomicity and isolation 
+guarantees. Since locks are stored separately in memory, however, a DBMS spends extra time to
+locate lock owners.
+        
+%         \item Locks are stored in separate data structure to avoid being swapped to disk
+%         \item Lock~\cite{a16-graefe}
+%         \begin{itemize}
+%             \item Protects the database logical contents from other txns
+%             \item Held for txn duration
+%             \item Need to be able to rollback changes
+%         \end{itemize}
+%         \item Latch~\cite{a16-graefe}
+%         \begin{itemize}
+%             \item Protects the critical sections of the DBMS internal data structure from other threads
+%             \item Held for operation duration
+%             \item Does not need to be able to rollback changes
+%         \end{itemize}
+
+%% ----------------------------------------------------
+%% Logging and Recovery
+%% ----------------------------------------------------
+\subsection*{Logging and Recovery}
+Most DBMS use \texttt{STEAL} + \texttt{NO-FORCE} buffer pool policies so all modifications 
+have to be flushed to the WAL before a transaction can commit~\cite{franklin14}.
+Log entries contain before and after image of record modified. The DBMS flushes WAL pages 
+to disk separately from corresponding modified database pages, so it takes extra work to keep track 
+of what log record is responsible for what page (e.g., LSN).
+
+
+%% ==================================================================
+%% IN-MEMORY DATABASE MANAGEMENT SYSTEMS
+%% ==================================================================
+\section{In-Memory Database Management Systems}
+The system architecture assumes that the primary storage location of the database is in 
+memory. This means that the DBMS does not need to perform extra steps during execution to 
+handle the case where it has to retrieve data from disk.
+If disk I/O is no longer the slowest resource, much of the DBMS architecture will have to 
+change to account for other bottlenecks:~\cite{stonebraker2007}
+\begin{itemize}
+    \item Locking/latching
+    \item Cache-line misses
+    \item Pointer chasing
+    \item Predicate evaluation
+    \item Data movement and copying
+    \item Networking (between application and DBMS)
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Data Organization
+%% ----------------------------------------------------
+\subsection*{Data Organization}
+We no longer need to use the slotted page layout in an in-memory DBMS as we do not have to worry 
+about packing pages data onto disk. We also do not have to store the data close to each other as we 
+are storing them on disk. Instead, an in-memory DBMS splits the data for tuples into fixed-length 
+and variable-length pools. Indexes 
+use direct pointers instead of record ids to the fixed-length data for each tuple. These tuples 
+then have 64-bit pointers to any 
+variable-length values stored in a separate memory location.
+
+% It is possible to directly use Memory-map (mmap) as a way to organized data. As a result, 
+% however, this yields memory management to the OS and gives away fine-tuned control on 
+% memory. This approach is feasible for read-only DBMS, but is generally not recommended.
+    
+%% ----------------------------------------------------
+%% Concurrency Control
+%% ----------------------------------------------------
+\subsection*{Concurrency Control}
+In-memory DBMSs still use either a pessimistic or optimistic concurrency control 
+schemes to interleave transactions. They will use modern variants of these algorithms that are 
+designed for in-memory data storage.
+The new bottleneck is contention caused from transactions trying to access data at the 
+same time.
+
+One key difference is that an in-memory DBMS can store locking information about each tuple 
+together with its data. This is because the cost of a transaction acquiring a lock is 
+the same as accessing data. Contrast this with disk-oriented DBMSs where locks are physically 
+stored separate from their tuples because the tuples may get swapped out to disk.
+
+%% ----------------------------------------------------
+%% Indexes
+%% ----------------------------------------------------
+\subsection*{Indexes}
+Like with concurrency control schemes, in-memory DBMSs will use data structures for their indexes 
+that are optimized for fast, in-memory access.
+% 
+In-memory DBMSs will not log index updates. Instead, the system will rebuild the indexes upon 
+restart when it loads the database back into memory. This avoids the runtime overhead of 
+logging updates to indexes during transaction execution.
+    
+%% ----------------------------------------------------
+%% Query Processing
+%% ----------------------------------------------------
+\subsection*{Query Processing}
+The best strategy for executing a query plan in a DBMS changes when all the data is 
+already in memory. Sequential scans are no longer significantly faster than random access.
+        
+The traditional tuple-at-a-time iterator model is too slow because of function calls.
+    
+%% ----------------------------------------------------
+%% Logging and Recovery
+%% ----------------------------------------------------
+\subsection*{Logging and Recovery}
+The DBMS still needs WAL on non-volatile storage since the system could halt at anytime.
+In many cases, however, it may be possible to use more lightweight logging schemes (e.g., only 
+store 
+redo information). For example, since there are no ``dirty pages'', the DBMS does not need to 
+maintain LSNs throughout the systems.
+%         
+In-memory DBMSs still takes checkpoints to reduce the amount of log that the system has to replay 
+during recovery.
+
+%% ==================================================================
+%% CONCURRENCY CONTROL
+%% ==================================================================
+\section{Concurrency Control}
+A DBMS's \textit{concurrency control protocol} to allow transactions to access a database in a 
+multi-programmed fashion while preserving the illusion that each of them is executing alone on a 
+dedicated system. The goal is to have the effect of a group of transactions on the database's state 
+is equivalent to any serial execution of all transactions. There are two high-level categories of 
+concurrency control schemes:
+\begin{enumerate}
+    \item \textbf{Two-Phase Locking (Pessimistic):}
+    Assume transactions will conflict so they must acquire locks on database objects before they 
+    are allowed to access them.
+    
+    \item \textbf{Timestamp Ordering (Optimistic):}
+    Assume that conflicts are rare so transactions do not need to first acquire locks on database 
+    objects and instead check for conflicts at commit time.
+\end{enumerate}
+
+%% ==================================================================
+%% TWO-PHASE LOCKING
+%% ==================================================================
+\section{Two-Phase Locking}
+There are two ways to deal with deadlocks in a two-phase locking (2PL) concurrency control protocol:
+
+\begin{itemize}
+    \item \textbf{Deadlock Detection:}
+    If deadlock is found, use a heuristic to decide what transaction to kill in order to break 
+    deadlock.
+    
+    \item \textbf{Deadlock Prevention:}
+    If lock is not available, then make a decision about how to proceed.
+\end{itemize}
+
+%% ==================================================================
+%% TIMESTAMP ORDERING AND OCC
+%% ==================================================================
+\section{Timestamp Ordering Concurrency Control}
+Use timestamps to determine the order of transactions.
+
+%% ----------------------------------------------------
+%% Basic T/O Protocol
+%% ----------------------------------------------------
+\subsection*{Basic T/O Protocol}
+Every transaction is assigned a unique timestamp when they arrive in the system.
+The DBMS maintains separate timestamps in each tuple's header of the last transaction that read 
+that tuple or wrote to it.
+Each transaction check for conflicts on each read/write by comparing their timestamp with the 
+timestamp of the tuple they are accessing.
+%     
+The DBMS needs copy a tuple into the transaction's private workspace when reading a tuple to 
+ensure repeatable reads.
+
+%% ----------------------------------------------------
+%% Optimistic Concurrency Control
+%% ----------------------------------------------------
+\subsection*{Optimistic Concurrency Control (OCC)}
+Store all changes in private workspace.
+Check for conflicts at commit time and then merge.
+First proposed in 1981 at CMU by \citeauthor{p213-kung}~\cite{p213-kung}.
+
+The protocol puts transactions through three phases during its execution:
+\begin{enumerate}
+    \item \textbf{Read Phase:}
+    Transaction's copy tuples accessed to private work space to ensure repeatable reads, and keep 
+    track of read/write sets.
+    
+    \item \textbf{Validation Phase:}
+    When the transaction invokes \sql{COMMIT}, the DBMS checks if it conflicts with other 
+    transactions. Parallel validation means that each transaction must check the read/write set of 
+    other transactions that are trying to validate at the same time. Each transaction has to 
+acquire 
+    locks for its write set records in some global order. Original OCC uses serial validation.
+    
+    The DBMS can proceed with the validation in two directions:
+    \begin{itemize}
+        \item Backward Validation:
+        Check whether the committing transaction intersects its read/write sets with those of any 
+        transactions that have \underline{already} committed.
+        
+        \item Forward Validation:
+        Check whether the committing transaction intersects its read/write sets with any active 
+        transactions that have \underline{not} yet committed.
+    \end{itemize}
+    
+    \item \textbf{Write Phase:}
+    The DBMS propagates the changes in the transactions write set to the database and makes them 
+    visible to other transactions' items. As each record is updated, the transaction releases the 
+    lock acquired during the Validation Phase
+\end{enumerate}
+
+%% ----------------------------------------------------
+%% Timestamp Allocation
+%% ----------------------------------------------------
+\subsection*{Timestamp Allocation}
+There are different ways for the DBMS to allocate timestamps for transactions~\cite{p209-yu}. Each 
+have their own performance trade-offs.
+\begin{itemize}
+    \item \textbf{Mutex:}
+    This is the worst option. Mutexes are \underline{always} a terrible idea.
+    
+    \item \textbf{Atomic Addition:}
+    Use compare-and-swap to increment a single global counter. Requires cache invalidation on write.
+    
+    \item \textbf{Batched Atomic Addition:}
+    Use compare-and-swap to increment a single global counter in batches.
+    Needs a back-off mechanism to prevent fast burn.
+
+    \item \textbf{Hardware Clock:}
+    The CPU maintains an internal clock (not wall clock) that is synchronized across all cores.
+    Intel only. Not sure if it will exist in future CPUs.
+    
+    \item \textbf{Hardware Counter:}
+    Single global counter maintained in hardware. Not implemented in any existing CPUs.
+\end{itemize}
+
+%% ==================================================================
+%% PERFORMANCE BOTTLENECKS
+%% ==================================================================
+\section{Performance Bottlenecks}
+All concurrency control protocols have performance and scalability problems when there are a large 
+number of concurrent threads and large amount of contention (i.e., the transactions are all trying 
+to read/write to the same set of tuples)~\cite{p209-yu}.
+
+\textbf{Lock Thrashing:}
+\begin{itemize}
+    \item
+    Each transaction waits longer to acquire locks, causing other transaction to wait longer to 
+    acquire locks.
+    
+    \item
+    Can measure this phenomenon by removing deadlock detection/prevention overhead.
+\end{itemize}
+    
+\textbf{Memory Allocation}
+\begin{itemize}
+    \item
+    Copying data on every read/write access slows down the DBMS because of contention on the memory 
+    controller.
+    
+    \item
+    Default libc malloc is slow. Never use it.
+\end{itemize}
+    
+ 
+%% ==================================================================
+%% NOTABLE EARLY IN-MEMORY DBMSS
+%% ==================================================================
+% \section{Notable Early In-memory DBMSs}
+% \begin{itemize}
+%     \item \dbSys{TimesTen}:
+%     Originally Smallbase~\cite{heytens95} from HP Labs.
+%     Multi-process, shared memory DBMS.
+%     Bought by Oracle in 2005~\cite{lahiri13}.
+% 
+%     \item \dbSys{Dali}:
+%     Multi-process shared memory storage manager using memory mapped files~\cite{jagadish94}.
+%         
+%     \item \dbSys{P*TIME}:
+%     Korean in-memory DBMS from the 2000s~\cite{cha04}.
+%     Lots of interesting features (e.g., hybrid storage layouts, support for larger-than-memory 
+%     databases). Sold to SAP in 2005 and is now part of HANA.
+% \end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{02-inmemory}
+
+\end{document}
