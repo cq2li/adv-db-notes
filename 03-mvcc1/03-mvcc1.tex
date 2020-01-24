@@ -1,0 +1,319 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{03}
+\newcommand{\lecturename}{Multi-Version Concurrency Control\texorpdfstring{\\}{ }(Design 
+Decisions)}
+\newcommand{\lecturedata}{2019-01-22}
+\newcommand{\rr}[1]{\textcolor{red}{#1}}
+
+\newcommand{\mvccField}[1]{\texttt{#1}\xspace}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% MULTI-VERSION CONCURRENCY CONTROL
+%% ==================================================================
+\section{Multi-version Concurrency Control (MVCC)}
+Originally proposed in 1978 MIT dissertation by \citeauthor{reed1978naming}~\cite{reed1978naming}.
+
+MVCC is currently the best approach for supporting transactions in mixed workloads.
+The DBMS maintains multiple \textbf{physical} versions of an object of a single 
+\textbf{logical} object in the database. 
+When a transaction writes to an object, the DBMS, creates a new version of that object.
+When a transaction reads an object, it reads the newest version that existed when a 
+transaction started.
+    
+\textbf{Main Benefits}
+\begin{itemize}
+    \item
+    Writers do not block readers, unlike 2PL which acquires exclusive writer locks.
+    
+    \item
+    Read-only transactions read a consistent snapshot without acquiring locks and txn ids 
+    (e.g., \dbSys{MySQL}).
+    
+    \item
+    Easily support time-travel queries.
+    
+%     \item
+%     Snapshot Isolation is guaranteed for MVCC implementations. Extra work is required for 
+%     Serializable Isolation.}
+\end{itemize}
+
+MVCC is more than just a ``concurrency control protocol''. It completely affects how the 
+DBMS manages transactions and the database. There are four key design decisions:~\cite{p781-wu}
+\begin{itemize}
+    \item Concurrency Control Protocol
+    \item Version Storage
+    \item Garbage Collection
+    \item Index Management
+    \item Transaction Id Wraparound
+\end{itemize}
+% \item Tuple Header Format
+% \begin{itemize}
+%     \item Txn-ID: Unique Txn Identifier
+%     \item Begin/End Timestamp: Version lifetime
+%     \item Pointer: Points to next or previous tuple in version chain
+%     \item Additional Meta-Data
+% \end{itemize}
+
+%% ==================================================================
+%% CONCURRENCY CONTROL PROTOCOL
+%% ==================================================================
+\section{Concurrency Control Protocol}
+A MVCC DBMS uses all of the same concurrency control protocols for single-versioned 
+systems. They are slightly modified to support in-memory databases and 
+multi-versioning, but the high-level concepts are the same.
+
+%% ----------------------------------------------------
+%% Tuple Meta-data
+%% ----------------------------------------------------
+\subsection*{Tuple Metadata}
+Disk-oriented DBMSs store metadata like locks in data structures that are separate from the 
+tuples. For an in-memory DBMS, the DBMS will store this metadata within the tuple's header. This 
+removes the need for the DBMS's concurrency control implementation to read separate memory 
+locations to retrieve information about the tuple. 
+
+This metadata includes the following 64-bit fields:
+\begin{itemize}
+    \item \textbf{\mvccField{Txn-Id}:}
+    Unique Transaction Identifier. This is usually a timestamp.
+    
+    \item \textbf{\mvccField{Begin-TS} / \mvccField{End-TS}:}
+    A start/end range that specifies that version's lifetime. The DBMS uses this to determine for a 
+    transaction whether this particular physical version of the tuple exists in its consistent 
+    snapshot.
+    
+    \item \textbf{\mvccField{Pointer}:}
+    The memory address for the next/previous version in the tuple's \textit{version chain}. The 
+    version chain is a singly linked-list of the physical versions for a logical object.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Timestamp Ordering
+%% ----------------------------------------------------
+\subsection*{Timestamp Ordering (MV-TO):}
+The DBMS adds an additional \mvccField{Read-TS} field in the tuple header to keep track of the 
+timestamp of the last transaction that read it.
+    
+For reads, a transaction is allowed to read version if the lock is unset and its 
+transaction id ($T_id$) is between \mvccField{Begin-TS} and \mvccField{End-TS}. Latches are not  
+required for read operations.
+    
+For writes, a transaction creates a new version if no other transaction holds lock and 
+$T_id$ is greater than \mvccField{Read-TS}. The write operation performs CAS on the 
+\mvccField{Txn-Id} field that provides a latch on this data tuple. After creating a 
+new version, it updates the \mvccField{End-TS} field with transaction timestamp.
+
+%% ----------------------------------------------------
+%% Timestamp Ordering
+%% ----------------------------------------------------
+\subsection*{Two-Phase Locking (MV-2PL)}
+The DBMS adds an additional \mvccField{Read-Cnt} field to each tuple's header that acts as a shared 
+lock. This is a 64-bit counter that tracks the number of transactions currently holding this lock.
+For reads, a transaction is allowed to hold the share lock if \mvccField{Txn-Id} is zero. It 
+then performs a CAS on \mvccField{Read-Cnt} to increment the counter by one.
+
+For writes, a transaction is allowed to hold the exclusive lock if both \mvccField{Txn-Id} 
+and \mvccField{Read-Cnt} are zero. The DBMS uses \mvccField{Txn-Id} and \mvccField{Read-Cnt} 
+together as exclusive lock. On commit, \mvccField{Read-Cnt} and \mvccField{Txn-Id} are reset to 
+zero.
+
+This design is good for deadlock prevention, but needs extra global data structures for 
+deadlock detection.
+
+%% ----------------------------------------------------
+%% Transaction Id Wraparound
+%% ----------------------------------------------------
+% \subsection*{Transaction Id Wraparound}
+% If the DBMS reaches the max value for its timestamps, it will have to wrap around and start at 
+% zero. This will make all previous versions be in the ``future'' from new transactions.
+% 
+% \textbf{Postgres \texttt{Txn-ID} Wraparound}
+% \begin{itemize}
+%     \item
+%     Stop accepting new commands when the system gets close to the max transaction id.
+%         
+%     \item
+%     Set a flag in each tuple header that says that it is ``frozen'' in the past. Any new 
+%     transaction id will always be newer than a frozen version.
+%         
+%     \item
+%     Runs the vacuum before the system gets close to this upper limit.
+% \end{itemize}
+
+%% ==================================================================
+%% VERSION STORAGE
+%% ==================================================================
+\section{Version Storage}
+The DBMS uses the tuple's pointer field to create a latch-free \textbf{version chain} per logical 
+tuple. This allows the DBMS to find the version that is visible to a particular transaction at 
+runtime. Indexes always point to ``head'' of the chain.
+
+Thread store versions in ``local'' memory regions to avoid contention on centralized data 
+structures. Different storage schemes determine where/what to store for each version.
+
+For non-inline attributes, the DBMS can reuse pointers to variable-length pool for values that do 
+not change between versions. This requires reference counters to know when it is safe to free 
+memory. This optimization also makes it more difficult to relocate memory from the variable-length 
+pool.
+    
+%% ----------------------------------------------------
+%% Append-Only Storage
+%% ----------------------------------------------------
+\subsection*{Append-Only Storage}
+All of the physical versions of a logical tuple are stored in the same table space 
+(table heap). On update, append new tuple to same table heap in an empty slot and update pointer.
+
+There are two ways of connecting pointers:
+
+\begin{itemize}
+    \item \textbf{Oldest-to-Newest (O2N):}
+    Append new version to end of chain, traverse entire chain on lookup.
+
+    \item \textbf{Newest-to-Oldest (N2O):}
+    Have to update index pointers for every new version, but do not have to traverse chain on 
+    look ups.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Time-Travel Storage
+%% ----------------------------------------------------
+\subsection*{Time-Travel Storage}
+Instead of storing all the tuples versions in a single table, the DBMS splits a single logical 
+table into two sub-tables: (1) \textit{main table} and (2) \textit{time-travel table}. The main 
+table keeps the latest version of tuples. When a transaction updates a tuple, the 
+DBMS copies current version from the main table to the time-travel table. It then overwrites 
+the master version in main table and updates its pointer to the recently copied entry in the 
+time-travel table.
+
+Garbage collection is fast with this approach since the DBMS can just drop entries from the 
+time-travel entry without scanning the main table. Sequential scans are faster easy since the DBMS 
+can just scan the main table without checking version information.
+
+%% ----------------------------------------------------
+%% Delta Storage
+%% ----------------------------------------------------
+\subsection*{Delta Storage}
+With this approach, the main table keeps the latest version of tuples. On every update, the 
+system copies only the values that were modified into a \textit{delta storage} area and 
+overwrite the master version. Transactions recreate old versions by applying the delta in reverse 
+order.
+
+Garbage collection is fast with this approach because the system just has to drop entries from 
+the delta storage. It is also has lower storage overhead than the other two approaches because 
+the system does not have to copy an entire tuple
+
+%% ----------------------------------------------------
+%% Non-inline Attributes
+%% ----------------------------------------------------
+\subsection*{Non-inline Attributes}
+Variable-length data can be stored in separate space and be referenced by a pointer in the data 
+tuple. Direct duplication of these data is wasteful, so the DBMS can reuse pointers to 
+variable-length pool for values that do not change between versions. One option is to use reference 
+counters to know when it is safe to free from memory. As a result the DBMS would not be able to 
+relocate memory easily, thus no existing system implements this optimization.
+
+% In practice, \textit{dictionary compression} solves this problem automatically.
+
+% TODO: Add discussion of non-inline attributes
+
+%% ==================================================================
+%% GARBAGE COLLECTION
+%% ==================================================================
+\section{Garbage Collection}
+The DBMS needs to remove \textbf{reclaimable} physical versions from the database over 
+time. A version is reclaimable if (1) no active transaction in the DBMS can see that version or 
+(2) the version was created by an aborted transaction.
+
+%% ----------------------------------------------------
+%% Tuple Level
+%% ----------------------------------------------------
+\subsection*{Tuple Level}
+With this approach, transactions do not maintain additional meta-data about old versions. Thus, the 
+DBMS has to scan tables to find old versions.
+
+\begin{itemize}
+    \item \textbf{Background Vacuuming:}
+    Separate threads periodically scan the table and look for 
+    reclaimable versions. Works with any version storage technique. To avoid repeatedly scanning 
+    through unmodified data, the DBMS can use a \textit{dirty block bitmap} to keep track of what 
+    blocks of data have been modified since the last scan.
+    
+    \item \textbf{Cooperative Cleaning:}
+    Worker threads identify reclaimable versions as they 
+    traverse version change. Only works with O2N version chains. A problem with this is that if 
+    there are never any queries that access tuples with reclaimable versions, then these versions 
+    will not get cleaned up (i.e., ``dusty corners''). Thus, the DBMS still has to periodically 
+    scan the table to find old versions.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Transaction Level
+%% ----------------------------------------------------
+\subsection*{Transaction Level}
+With this approach, transactions keep track of their old version so the DBMS does not have to 
+scan tuples to determine visibility.
+The DBMS determines when all versions created by a finishing transaction are no 
+longer visible.
+    
+% May still maintain multiple threads to reclaim the memory fast enough for the workload.
+
+%% ==================================================================
+%% INDEX MANAGEMENT
+%% ==================================================================
+\section{Index Management}
+How often the DBMS updates index depends on whether system creates new versions when a tuple is 
+updated.
+
+%% ----------------------------------------------------
+%% Primary Key
+%% ----------------------------------------------------
+\subsection*{Primary Key}
+Primary key indexes always point to the version chain head.
+If a transaction updates a primary key attribute(s), then this is treated as a \sql{DELETE} 
+followed by an \sql{INSERT}.
+
+%% ----------------------------------------------------
+%% Secondary Indexes
+%% ----------------------------------------------------
+\subsection*{Secondary Indexes}
+Managing secondary indexes is more complicated than primary key indexes. There are two approaches 
+to storing values that represent the location of a tuple's version chain.
+
+\textbf{Approach \#1: Physical Address}
+\begin{itemize}
+    \item
+    Use physical address to the version chain head.
+    \item
+    If a databases has many secondary indexes, then updates can become expensive because the DBMS 
+    has update all the indexes to the new location (e.g., each update to a N2O version chain 
+    requires the DBMS to update every index with the memory address of the new version chain head).
+\end{itemize}
+
+\textbf{Approach \#2: Logical Pointer}
+\begin{itemize}
+    \item \textbf{Primary Key:}
+    Store the tuple's primary key as the value for a secondary index, which will then 
+    redirect to the physical address. This approach has high store overhead if the size of 
+    the primary key is large.
+
+    \item \textbf{Tuple ID:}
+    Use a fixed identifier per tuple that does not change. This approach requires an extra 
+    indirection layer to map the id to a physical address. For example, this could be a hash table 
+    that maps Tuple IDs to physical addresses.
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{03-mvcc1}
+
+\end{document}
