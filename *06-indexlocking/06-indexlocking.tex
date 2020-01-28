@@ -1,0 +1,322 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{6}
+\newcommand{\lecturename}{Index Locking and Latching}
+\newcommand{\lecturedata}{2018-02-07}
+\newcommand{\rr}[1]{\textcolor{red}{#1}}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% DATABASE INDEXES, skip profiling
+%% ==================================================================
+\section{Database Indexes}
+An index is a data structure that improves the speed of data retrieval operations on a table at the 
+cost of additional writes and storage space.
+The DBMS use indexes to locate data without having to search every row in a table 
+every time a table is accessed. We introduce two types of indexes used in DBMS:
+
+%% ----------------------------------------------------
+%% Order Preserving Indexes
+%% ----------------------------------------------------
+\subsection*{Order Preserving Indexes}
+\begin{itemize}
+    \item
+    A tree structure that maintains keys in some sorted order.
+    
+    \item
+    Supports all possible predicates (e.g., equality predicates, range scans) with O(log(n)) searches.
+    
+    \item
+    \rr{The sorted guarantee and logarithmic search time make these types of indexes useful for many application domains.}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Hashing Indexes
+%% ----------------------------------------------------
+\subsection*{Hashing Indexes}
+\begin{itemize}
+    \item
+    An associative array that maps a hash of the key to a particular record.
+    
+    \item
+    Only support equality predicates with O(1) searches.
+\end{itemize}
+%% ----------------------------------------------------
+%% Lock vs Latches
+%% ----------------------------------------------------
+\rr{
+\subsection*{Lock vs Latches}
+We need to make the distinction between locks and latches. Compared to OS concepts, in database concepts, locks are different from latches. Indexes require different locking schemes than database objects (e.g. tuples) because the physical structure can change as long as the logical contents are consistent.
+\begin{itemize}
+    \item Locks
+    \begin{itemize}
+        \item Protects the index’s logical contents from other txns.
+        \item Held for txn duration.
+        \item Need to be able to rollback changes.
+    \end{itemize}
+    \item Latches
+    \begin{itemize}
+        \item Protects the critical sections of the index’s internal data structure from other threads.
+        \item Held for operation duration.
+        \item Do not need to be able to rollback changes.
+    \end{itemize}
+\end{itemize}}
+
+%% ----------------------------------------------------
+%% Lock-Free Indexes Approaches
+%% ----------------------------------------------------
+\subsection*{Lock-Free Indexes Approaches}
+When somebody says that they have a ``lock-free'' index, it can mean one of two 
+things~\cite{graefe10}:
+
+\textbf{No Locks}
+\begin{itemize}
+    \item Transactions do not acquire locks to access/modify database.
+    \item Still have to use latches to install updates.
+\end{itemize}
+
+\textbf{No Latches}
+\begin{itemize}
+    \item Swap pointers using atomic updates to install changes.
+    \item Still have to use locks to validate transactions.
+\end{itemize}
+
+%% ==================================================================
+%% LATCH IMPLEMENTATIONS
+%% ==================================================================
+\section{Latch Implementations}
+The underlying primitive that we can use to implement a latch is through an atomic \textit{compare-and-swap} (CAS) instruction that modern CPUs provide. With this, a thread can check the contents of a memory location to see whether it has a certain value. If it does, then the CPU will swap the old value with a new one. Otherwise the memory location remains unmodified.
+
+There are several approaches to implementing a latch in a DBMS. Each approach have different trade-offs in terms of engineering complexity and runtime performance. These test-and-set steps are performed atomically (i.e., no other thread can update the value after one thread checks it but before it updates it). 
+
+%% ----------------------------------------------------
+%% Blocking OS Mutex
+%% ----------------------------------------------------
+\subsection*{Blocking OS Mutex}
+Use the OS built-in mutex infrastructure as a latch. \rr{The futex (fast user-space mutex) is comprised of (1) a spin latch in user-space and (2) a OS-level mutex. If the DBMS can acquire the user-space latch, then the latch is set.} It appears as a single latch to the DBMS even though it contains two internal latches. If the DBMS fails to acquire the user-space latch, then it goes down into the kernel and tries to acquire a more expensive mutex. If the DBMS fails to acquire this second mutex, then the thread notifies the OS that it is blocked on the lock and then it is descheduled.
+
+OS mutex is generally a bad idea inside of DBMSs as it is managed by OS and has large overhead.
+
+\begin{itemize}
+    \item \textbf{Example:} \texttt{std::mutex}
+
+    \item \textbf{Advantages:} Simple to use and requires no additional coding in DBMS.
+
+    \item \textbf{Disadvantages:} Expensive and non-scalable (about 25~ns per lock/unlock invocation) because of OS scheduling.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Test-and-Set Spin Lock
+%% ----------------------------------------------------
+\subsection*{Test-and-Set Spin Lock (TAS)}
+\rr{Spin locks are a more efficient alternative to an OS mutex as it is controlled by the DBMSs. A spin lock is essentially a location in memory that threads try to update (e.g., setting a boolean value to true). A thread performs CAS to attempt to update the memory location. If it cannot, then it spins in a while loop forever trying to update it.}
+\begin{itemize}
+    \item \textbf{Example:} \texttt{std::atomic<T>}
+    
+    \item \textbf{Advantages:} Latch/unlatch operations are efficient (single instruction to lock/unlock).
+    
+    \item \textbf{Disadvantages: }
+    \rr{Not scalable nor cache friendly because with multiple threads, the CAS instructions will be executed multiple times in different threads. These wasted instructions will pile up in high contention environments; the threads look busy to the OS even though they are not doing useful work. This leads to cache coherence problems because threads are polling cache lines on other CPUs.
+    One way to improve this is to limit the number of retries for each thread, so after a number of retries the thread pauses and retries after a cool-down period.}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Queue-Based Spinlock
+%% ----------------------------------------------------
+\subsection*{Queue-Based Spin Lock (MCS)}
+% Spin locks have bad locality, so we want to find an approach that will yield better cache performance.
+\rr{Also known as Mellor-Crummey and Scott (MCS) locks. An MCS lock is a chain of spin locks implemented as a linked-list. Every time a thread tries to grab a latch, it performs CAS along the latch chain. If CAS succeeds, it creates a new latch and appends the latch to the chain.}
+
+\begin{itemize}
+    \item 
+    \textbf{Example:} \texttt{std::atomic$<$Latch*$>$}. \texttt{Latch*} is a pointer to the next latch; it is a DBMS-specific object, not part of the C++ STL.
+    \item
+    \textbf{Advantages:} More efficient than mutex, better cache locality \rr{than spin locks}.
+    
+    \item
+    \textbf{Disadvantages:}  Non-trivial memory management.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Reader-Writer Locks
+%% ----------------------------------------------------
+\subsection*{Reader-Writer Locks}
+\rr{Spin locks / MCS do not differentiate between reads / writes. We need a way to allow for concurrent reads, so if the application has heavy reads it will have better performance because readers can share resources instead of waiting.}
+\begin{itemize}
+    \item
+    Allows for concurrent readers.
+    
+    \item
+    Have to manage read/write queues to avoid starvation.
+    
+    \item
+    Can be implemented on top of spin locks.
+\end{itemize}
+
+%% ==================================================================
+%% INDEX LATCHING
+%% ==================================================================
+\section{Index Latching}
+\rr{Latches are essential for protecting the integrity of index's underlying physical data structures (e.g., B+ Tree, RB Tree). When multiple threads are reading and updating the index at the same time, latches make sure that threads are following correct pointers and reading valid regions of memory. However, latches do not protect logical contents of the index like transactions.}
+
+%% ----------------------------------------------------
+%% Latch Crabbing
+%% ----------------------------------------------------
+\subsection*{Latch Crabbing}
+\rr{Latch Crabbing is the standard technique for supporting concurrent reader/writers in a B+Tree~\cite{a1-bayer}.}
+
+A thread acquires and releases latches on B+Tree nodes when traversing the data structure. It can release latch on a parent node if its child node is considered \textbf{safe}:
+    \begin{itemize}
+        \item
+        A node is safe if it will not split or merge when updated.
+        
+        \item
+        Not full (on insertion).
+        
+        \item
+        More than half-full (on deletes).
+    \end{itemize}
+
+\textbf{Search:}
+Start at root and go down, acquiring read (\lock{R}) latch on the next child node and next unlocking parent.
+
+\textbf{Insert/Delete:}
+Start at root and go down, acquiring write (\lock{W}) latches if 
+needed. Once child is latched, if it is safe, release all latches on ancestors
+
+%% ----------------------------------------------------
+%% Better Latch Crabbing
+%% ----------------------------------------------------
+\subsection*{Better Latch Crabbing}
+The problem with the previous latch crabbing approach is that it requires each thread to lock the 
+root as the first step each time. This is a major bottleneck.
+
+A better approach is to optimistically assume that the node is safe~\cite{a1-bayer}.
+\begin{itemize}
+    \item
+    Take \lock{R} latches as you traverse the tree to reach leaf and verify.
+    
+    \item
+    If leaf is not safe, then fallback to previous algorithm.
+\end{itemize}
+
+%% ==================================================================
+%% INDEX LOCKING SCHEMES
+%% ==================================================================
+\section{Index Locking}
+Crabbing does not protect from phantoms because we are releasing locks as soon as 
+insert/delete operation ends \rr{for the DBMS's physical data structure}. 
+\rr{We use index locking} to protect the index's logical contents from 
+other transactions to avoid phantoms.
+
+Difference with index latches:
+\begin{itemize}
+    \item
+    Locks are held for the entire duration of a transaction.
+    
+    \item
+    Only acquired at the leaf nodes.
+    
+    \item
+    Not physically stored in index data structure.
+\end{itemize}
+There are different ways to perform index locking that provide different levels of protection.
+
+%% ----------------------------------------------------
+%% Predicate Locks
+%% ----------------------------------------------------
+\subsection*{Predicate Locks}
+Proposed locking scheme from \dbSys{IBM System R} that figures out what tuples to lock based on a query's \sql{WHERE} clause~\cite{p624-eswaran}. It was never implemented in a real system due to its complexity.
+
+\begin{itemize}
+    \item
+    Shared lock on the predicate in a \sql{WHERE} clause of a \sql{SELECT} query.
+    
+    \item
+    Exclusive lock on the predicate in a \sql{WHERE} clause of any \sql{UPDATE},\sql{INSERT}, 
+    and \sql{DELETE}.
+    
+    \item
+    Precision locks are a simplification of predicate locks.
+    
+    \item
+    Can determine if there will be a conflict by looking at the query without having to run it.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Key-Value Locks
+%% ----------------------------------------------------
+\subsection*{Key-Value Locks}
+\begin{itemize}
+    \item A Key-Value Lock covers a single key value. It provides exclusive access to this key-value for the thread that is holding the lock.
+    \item Need ``virtual keys'' for non-existent values. If a key does not exist yet, the DBMS still needs to use Key-Value lock to protect the memory location to be allocated because concurrent reads might occur before creation of the key-value. 
+    \item Cannot store lock in index \rr{since there could be an arbitrary amount of virtual keys; the gaps between the keys are infinite}.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Gap Locks
+%% ----------------------------------------------------
+\subsection*{Gap Locks}
+\begin{itemize}
+    \item
+    Each transaction acquires a key-value lock on the single key that it wants to access, then get 
+    a gap lock on the next key gap.
+    
+    \item
+    The DBMS cannot store lock in an index node because the physical location of a node can change.
+    This means that the DBMS has to scan all of the index nodes to find the locks that a 
+    transaction holds in order to release them.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Key-Range Locks
+%% ----------------------------------------------------
+\subsection*{Key-Range Locks}
+\begin{itemize}
+    \item
+    A transaction takes locks on ranges in the key space.
+    
+    \item
+    Each range is from one key that appears in the relation, to the next that appears.
+    
+    \item
+    \rr{Can acquire either \textit{prior} key locks or \texit{next} key locks. To prevent deadlocks, a transaction can only acquire one of the two lock modes can be acquired at the same time.}
+    
+    \item
+    Define lock modes so conflict table will capture commutativity of the of the operations 
+    available.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Hierarchical Locking
+%% ----------------------------------------------------
+\subsection*{Hierarchical Locking}
+\begin{itemize}
+    \item
+    Allow for a transaction to hold wider key-range locks with different locking modes.
+    
+    \item
+    \rr{Higher level intention exclusive (\lock{IX})} reduces the number of visits to lock manager.
+    
+    \item Allows for nesting of compatible locks (e.g., an \lock{X} lock inside an \lock{IX} 
+    key-range lock).
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{06-indexlocking}
+
+
+
+
+
+\end{document}
