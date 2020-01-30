@@ -2,8 +2,10 @@
 
 \newcommand{\lecturenumber}{04}
 \newcommand{\lecturename}{Multi-Version Concurrency Control (Protocols)}
-\newcommand{\lecturedata}{2019-01-28}
+\newcommand{\lecturedata}{2020-01-27}
 \newcommand{\rr}[1]{\textcolor{red}{#1}}
+
+\newcommand{\mvccField}[1]{\texttt{#1}\xspace}
 
 \usepackage{../dbnotes}
 
@@ -16,59 +18,60 @@
 %% MICROSOFT HEKATON
 %% ==================================================================
 \section{\dbSys{Microsoft Hekaton}}
-Incubator project started in 2008 to create new in-memory OLTP engine for \dbSys{Microsoft SQL 
-Server} (MSSQL). Led by top database experts Paul Larson and Mike Zwilling. It was important that the new 
+Hekaton started as an internal at Microsoft in 2008. The goal was to create new in-memory OLTP 
+engine for \dbSys{Microsoft SQL Server} (MSSQL). The project was led by database experts Paul 
+Larson and Mike Zwilling. It was important that the new 
 engine integrated with \dbSys{MSSQL} ecosystem. It was also necessary that the engine support all 
 possible OLTP workloads with predictable performance.
 
-Key lessons:
+Key Lessons from Hekaton on building a high-performance OLTP DBMS:
 \begin{itemize}
     \item
     Use only lock-free data structures. This means no latches, spin locks, or critical 
-    sections for indexes, transaction map, memory allocator, garbage collector. \rr{Not necessarily true for indexes; systems using traditional latching methods for indexing more often than not outperform lock-free implementations.}
+    sections for indexes, transaction map, memory allocator, garbage collector.
+    Not necessarily true for indexes; systems using traditional latching methods for indexing more 
+    often than not outperform lock-free implementations.
         
     \item
     Only one single serialization point in the DBMS to get the transaction's begin and commit 
-    timestamp using an atomic addition (CAS). \rr{At high parallelism levels this could be a bottleneck. In this case we can improve performance with batching techniques.}
+    timestamp using an atomic addition (i.e., compare-and-swap -- CaS). At high parallelism levels 
+    this could be a bottleneck. In this case we can improve performance with batching 
+    techniques.
 \end{itemize}
 
-The Hekaton concurrency control relies on compare-and-swap to install new 
+The Hekaton concurrency control protocol relies on CaS to install new 
 versions~\cite{p298-larson}.
 \begin{itemize}
     \item
-    Each transaction is assigned a timestamp when they begin (\texttt{BeginTS}) and when they 
-    commit (\texttt{EndTS}).
+    Each transaction is assigned a timestamp when they begin (\mvccField{BeginTS}) and when they 
+    commit (\mvccField{EndTS}). Hekaton uses a special bit for transaction's \mvccField{BeginTS} 
+    field to indicate whether it represents an uncommitted transaction.
         
     \item
     Each tuple contains two timestamps that represents their visibility and current state.
     \begin{itemize}
-        \item \textbf{\texttt{BEGIN}}:
-        The \texttt{BeginTS} of the active transaction or the \texttt{EndTS} of the committed 
+        \item \textbf{\texttt{BEGIN-TS}}:
+        The \mvccField{BeginTS} of the active transaction or the \mvccField{EndTS} of the committed 
         transaction that created it.
             
-        \item \textbf{\texttt{END}}:
-        The \texttt{BeginTS} of the active transaction that created the next version or 
-        infinity or the \texttt{EndTS} of the committed transaction that created it
-        
-        \item \rr{Hekaton uses a special bit for the \texttt{TS} field to indicate whether this is from an uncommitted transaction.}
-
+        \item \textbf{\mvccField{END-TS}}:
+        The \mvccField{BeginTS} of the active transaction that created the next version or 
+        infinity or the \mvccField{EndTS} of the committed transaction that created it
     \end{itemize}
-    
-    \item \rr{\textbf{Speculative Reads}}:
-    Hekaton allows transactions to read versions of transactions of uncommitted 
-    transactions. Then checks in validations if the transactions that it read uncommitted data 
-    committed.
-    The DBMS does not allow speculative write; first transaction to write a new version succeeds, 
-    second gets aborted.
 \end{itemize}
+
+% \textbf{Speculative Reads}:
+Hekaton allows transactions to speculatively read versions of transactions of uncommitted 
+transactions. Then checks in validations if the transactions that it read uncommitted data 
+committed. The DBMS does not allow speculative write; first transaction to write a new version 
+succeeds, subsequent transactions that attempt to write to the same tuple are aborted.
 
 %% ----------------------------------------------------
 %% Transaction State Map
 %% ----------------------------------------------------
 \subsection*{Transaction State Map}
 Global map of all transactions states in the system. Transactions have to consult this map to 
-determine the 
-state of a transaction.
+determine the state of a transaction.
 \begin{itemize}
     \item \texttt{ACTIVE}:
     The transaction is executing read/write operations.
@@ -77,55 +80,82 @@ state of a transaction.
     The transaction has invoked commit and the DBMS is checking whether it is valid.
     
     \item \texttt{COMMITTED}:
-    The transaction is finished, but may not have updated its version's \texttt{TS}.
+    The transaction is finished, but may not have updated its version's timestamps.
     
     \item \texttt{TERMINATED}:
-    The transaction has updated the \texttt{TS} for all of the versions that it created.
+    The transaction has updated the timestamps for all of the versions that it created.
 \end{itemize}
 
-\rr{\textbf{Transaction Life-Cycle}}
-\rr{\begin{enumerate}
-    \item \textbf{\texttt{BEGIN}}: Get \texttt{BeginTS}, set state to ACTIVE
-    \item Normal processing for read/write queries. In addition to updating version information, we also need to keep track of transaction's read set, scan set and write set.
-    \item \textbf{\texttt{PRECOMMIT}}: Get \texttt{CommitTS}, set state to \texttt{VALIDATING}.
-    \item Validation, validate read and scans. If validation passes, write new versions to redo log.
-    \item Post-processing, update version timestamps. We use \texttt{BeginTS} in new versions, \texttt{CommitTS} in old versions.
-    \item \textbf{\texttt{TERMINATE}}: Set transaction state to \text{TERMINATED} and remove from map.
-\end{enumerate}}
+%% ----------------------------------------------------
+%% Transaction Life-Cycle
+%% ----------------------------------------------------
+\subsection*{Transaction Life-Cycle}
+\begin{enumerate}
+    \item \textbf{Begin}:
+    Get \mvccField{BeginTS}, set state to ACTIVE. The transaction then begins its normal 
+    execution for read/write queries. In addition to updating version information, the DBMS
+    also tracks each transaction's read set, scan set and write set.
+    
+    \item \textbf{Pre-Commit}:
+    Assign the transaction its \mvccField{EndTS} and set its state in the transaction map to 
+    \texttt{VALIDATING}. During validationm the DBMS checks whether the transaction's reads and 
+    scans produce the same result (to ensure serializability). If validation passes, then the DBMS 
+    writes new versions to redo log.
+    
+    \item \textbf{Post-Processing}:
+    Update the timetamps for the versions that the tranaction either creatred or 
+    invalidated. The transaction updates the \mvccField{BeginTS} in new versions, \texttt{CommitTS} 
+    in old versions.
+    
+    \item \textbf{Terminate}:
+    Set transaction state to \text{TERMINATED} and remove from map.
+\end{enumerate}
 
 %% ----------------------------------------------------
-%% Transaction Meta-Data Make a subsection called meta-data, put state map and local meta-data, another subsection concurrency control
+%% Transaction Meta-Data
 %% ----------------------------------------------------
 \subsection*{Transaction Meta-Data}
+The DBMS maintains additional meta-data about what transactions did during execution.
+
 \begin{itemize}
-    \item \texttt{Read Set:}
+    \item \textbf{Read Set}:
     Pointers to every version that the transaction read.
     
-    \item \texttt{Write Set:}
+    \item \textbf{Write Set:}
     Pointers to the versions that the transaction updated (old and new), deleted (old), 
     and inserted (new).
     
-    \item \texttt{Scan Set:}
+    \item \textbf{Scan Set:}
     Stores enough information needed to perform each scan operation.
     
-    \item \texttt{Commit Dependencies:}
+    \item \textbf{Commit Dependencies:}
     List of transactions that are waiting for this transaction to finish.
 \end{itemize}
 
 %% ----------------------------------------------------
 %% Transaction Validation
 %% ----------------------------------------------------
-\rr{\subsection*{Transaction Validation}
-Hekaton used both optimistic / pessimistic schemes for transactions. Optimistic schemes outperforms pessimistic ones as the number of cores and parallelism increase.
-\begin{itemize}
-    \item Optimistic Transactions: Check whether a version read is still visible at the end of a transaction. Repeat all index scans to check for phantoms. 
-    \item Pessimistic Transactions: Use shared and exclusive locks on records and buckets. Do not need any validations and use a separate background thread to perform deadlock detection. Under this setting, the DBMS does not need to perform validation.
-\end{itemize}}
+\subsection*{Transaction Validation}
+Hekaton used both optimistic / pessimistic schemes for transactions. Optimistic schemes outperforms 
+pessimistic ones as the number of cores and parallelism increase.
 
+\begin{itemize}
+    \item \textbf{Optimistic Transactions}:
+    Check whether a version read is still visible at the 
+    end of a transaction. Repeat all index scans to check for phantoms. 
+
+    \item
+    \textbf{Pessimistic Transactions}:
+    Use shared and exclusive locks on records and buckets. Do 
+    not need any validations and use a separate background thread to perform deadlock detection. 
+    Under this setting, the DBMS does not need to perform validation.
+\end{itemize}
+    
 The DBMS needs to scan transactions to provide its transactional guarantees.
 \begin{itemize}
-\item \textbf{First-Writer Wins:}
-The version vector always points to the last committed version. Do not need to check whether write-sets overlap.
+    \item \textbf{First-Writer Wins:}
+    The version vector always points to the last committed version. Do not need to check whether 
+    write-sets overlap.
 
     \item \textbf{Read Stability:}
     Check that each version read is still visible as of the end of 
@@ -282,6 +312,6 @@ TODO: Add intro paragraph to say that Cicada has several optimizations to speed 
 % ==================================================================
 \newpage
 \bibliographystyle{abbrvnat}
-\bibliography{04-mvccprotocols}
+\bibliography{04-mvcc2}
 
 \end{document}
