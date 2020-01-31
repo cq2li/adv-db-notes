@@ -3,7 +3,6 @@
 \newcommand{\lecturenumber}{04}
 \newcommand{\lecturename}{Multi-Version Concurrency Control (Protocols)}
 \newcommand{\lecturedata}{2020-01-27}
-\newcommand{\rr}[1]{\textcolor{red}{#1}}
 
 \newcommand{\mvccField}[1]{\texttt{#1}\xspace}
 
@@ -98,12 +97,12 @@ determine the state of a transaction.
     
     \item \textbf{Pre-Commit}:
     Assign the transaction its \mvccField{EndTS} and set its state in the transaction map to 
-    \texttt{VALIDATING}. During validationm the DBMS checks whether the transaction's reads and 
+    \texttt{VALIDATING}. During validation the DBMS checks whether the transaction's reads and 
     scans produce the same result (to ensure serializability). If validation passes, then the DBMS 
     writes new versions to redo log.
     
     \item \textbf{Post-Processing}:
-    Update the timetamps for the versions that the tranaction either creatred or 
+    Update the timestamps for the versions that the transaction either created or 
     invalidated. The transaction updates the \mvccField{BeginTS} in new versions, \texttt{CommitTS} 
     in old versions.
     
@@ -195,34 +194,37 @@ transactions that try to update an uncommitted object.
 %% Transaction Validation
 %% ----------------------------------------------------
 \subsection*{Transaction Validation}
-\begin{itemize}
-    \item \textbf{First-Writer Wins}
-    \item \textbf{Precision 
-    Lock:} Compare the committed transaction's write set for phantoms using Precision Locking~\cite{jordan81}. \rr{For each validating transactions, we evaluate its \sql{WHERE} clause based on each delta record of the transactions that are committed \textit{after} the validation has started:
-    \begin{itemize}
-        \item If the predicate evaluates to false, we know that particular transaction from the delta storage did not create a version that we should have read.
-        \item If the predicate evaluates to true for some transaction's delta record, we know that we should have read the version created by that transaction. We abort our validating transactions and rollback our changes.
-    \end{itemize}}
-    \item
-    Only need to store the transaction's read predicates and not its entire read set.
-    \item \rr{Hyper uses single-threaded execution for write transactions.}
+Like \dbSys{Hekaton}, \dbSys{HyPer} uses the first-writer wins policy.
+Although \dbSys{HyPer}'s MVCC protocol supports multiple writers, the actual implementation uses 
+single-threaded execution for write transactions.
 
+It also uses a technique called \textit{precision locking} to enforce 
+serializability~\cite{jordan81}. The system only stores each transaction's read predicates 
+and not its entire read set.
+For each validating transactions, the DBMS evaluates its \sql{WHERE} clause based on each delta 
+record of any transactions that committed \textit{after} the committing transaction has started.
+\begin{itemize}
+    \item
+    If the predicate evaluates to false, then the already committed transaction did not create 
+    a version that the committing transaction should have read.
+        
+    \item
+    If the predicate evaluates to true, then this means that the committing transaction should have 
+    read the version created by the other transaction. Thus, the DBMS will abort our validating     
+    transactions and rollback its changes.
 \end{itemize}
 
 %% ----------------------------------------------------
 %% Version Synopsis
 %% ----------------------------------------------------
 \subsection*{Version Synopsis}
-\begin{itemize}
-    \item
-    Store a separate column that tracks the position of the first and last versioned tuple in 
-    a block of tuples.
-
-    \item
-    When scanning tuples, the DBMS can check for strides of tuples without older versions and 
-    execute more efficiently.
-\end{itemize}
-
+Checking the version vector for every tuple during long table scans is expensive. This is wasted 
+work for cold data that is unlikely to have previous versions. Thus, to avoid this work, 
+\dbSys{HyPer} maintains special \textit{version synopsis} tags per block to keep track of ranges of 
+tuples that do not have versions. This is a separate column that tracks the position of the first 
+and last versioned tuple in a block of tuples.
+When scanning tuples, the DBMS can check for strides of tuples without older versions and 
+execute more efficiently.
 
 %% ==================================================================
 %% SAP HANA
@@ -237,34 +239,31 @@ transactions that try to update an uncommitted object.
 \end{itemize}
 
 %% ----------------------------------------------------
-%% Transaction Validation
+%% Version Storage
 %% ----------------------------------------------------
 \subsection*{Version Storage}
-\begin{itemize}
-    \item 
-    Store the oldest version in the main data table.
-    
-    \item 
-    Each tuple maintains a flag to denote whether there exists newer versions in the version space. 
-    
-    \item \rr{Maintains a separate hash table that maps the logical record id for the tuple to the head of the version chain. This avoids storing additional metadata about versioning in the main table.}
-\end{itemize}
+The DBMS stores the oldest version in the main data table.
+Each tuple in the main data table contains a flag to denote whether there exists newer versions in 
+the version space (i.e., time-travel table). For the time-travel table, the DBMS maintains a 
+separate hash table that maps the logical record id for the tuple to the head of the version chain. 
+This avoids storing additional metadata about versioning in the main table.
 
-\subsection*{Transactions}
-\begin{itemize}
-    \item
-    Store a pointer to a context object instead of embedding meta-data about the txn that created a version with the data.
+Instead of embedding begin/end timestamps in each tuple, \dbSys{HANA} instead stores a 
+pointer in each tuple to a context object. This object contains all the meta-data about the 
+transaction that created a version with the data. This allows the DBMS to update the timestamps for 
+multiple just by writing to this context instead of having to update each tuple individually.
 
-    \item
-    Store meta-data about whether a txn has committed in a separate object as well.
-\end{itemize}
+The system has another layer of indirection for the meta-data about whether a transaction has 
+committed. This separate context object keeps track of when transactions commit and when their log 
+records have been flushed to disk.
 
 %% ==================================================================
 %% CICADA
 %% ==================================================================
-\section{\dbSys{CMU Cicada}}
-In-memory OLTP engine based on optimistic MVCC with append-only storage (N2O)~\cite{p21-lim}.
-Designed to be scalable for both low and high contention workloads.
+\section{\dbSys{Cicada}}
+\dbSys{Cicada} is an academic in-memory OLTP engine based on optimistic MVCC with append-only 
+storage (N2O)~\cite{p21-lim}. It was designed with specific optimizations for supporting both low 
+and high contention workloads:
 \begin{itemize}
     \item Best-effort in-lining
     \item Loosely Synchronized Clocks
@@ -290,21 +289,27 @@ Designed to be scalable for both low and high contention workloads.
 %% ----------------------------------------------------
 \subsection*{Transaction Validation}
 
-TODO: Add intro paragraph to say that Cicada has several optimizations to speed up the validation step in their DBMS.
+% TODO: Add intro paragraph to say that Cicada has several optimizations to speed up the validation 
+% step in their DBMS.
 
 \begin{itemize}
     \item \textbf{Contention-aware Validation:}
-    Validate access to recently modified (high contention) records first. \rr{Instead of comparing transactions' read sets, Cicada tries to reorder them based on their write timestamps. Transactions are written most recently are more likely to have conflicts, so it would be a good idea to check them first.}
+    Validate access to recently modified (high contention) records first. Instead of comparing 
+    transactions' read sets, \dbSys{Cicada} tries to reorder them based on their write timestamps. 
+    The DBMS keeps track of what transactions are mostly likely to conflict for a 
+    transaction attempting to commit, so it then checks for conflicts with them first.
     
     \item \textbf{Early Consistency Check:}
-    Pre-validated access set before making global writes. \rr{Rather than waiting until the end of a transaction to perform validation, we can preemptively kill transactions that might abort later on.}
-    
-    \item If the DBMS knows that most of the recently executed transactions committed successfully,
-    then it can skip Contention-Aware Validation and Early Consistency check
-    
+    Pre-validated access set before making global writes. Rather than waiting until the end of 
+    a transaction to perform validation, we can preemptively kill transactions that might abort 
+    later on.
+      
     \item \textbf{Incremental Version Search:}
-    Resume from last search location in version list \rr{to improve cache performance}.
+    Resume from last search location in version list to improve cache performance.
 \end{itemize}
+
+If the DBMS knows that most of the recently executed transactions committed successfully,
+then it can skip Contention-Aware Validation and Early Consistency check
 
 
 % ==================================================================
