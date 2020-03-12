@@ -1,8 +1,8 @@
 \documentclass[11pt]{article}
 
-\newcommand{\lecturenumber}{07}
-\newcommand{\lecturename}{Latch-Free Data Structures}
-\newcommand{\lecturedata}{2019-02-12}
+\newcommand{\lecturenumber}{06}
+\newcommand{\lecturename}{OLTP Indexes (Tree Data Structures)}
+\newcommand{\lecturedata}{2020-03-03}
 \newcommand{\rr}[1]{\textcolor{red}{#1}}
 
 \usepackage{../dbnotes}
@@ -16,21 +16,34 @@
 %% INTRODUCTION
 %% ==================================================================
 \section{Introduction}
-\rr{The original B+Tree was designed for efficient access of data stored on slow disks. We need alternative data structures specifically designed for in-memory databases. Compared to disk-based DBMS, an in-memory DBMS assumes that the entire data structure fits in memory. Therefore, we can use more efficient schemes to support multi-thread access for indexes.}
+The original B+Tree~\cite{comer79} from 1970s was designed for efficient access of data stored on 
+slow disks. But if we assume that a database fits entirely in memory (including its indexes), 
+then we may need to consider alternative data structures that are specifically designed for this 
+operating environment. Such data structures could provide more efficient multi-threaded access.
 
-\rr{In latch-free data structures, threads use atomic CAS instructions instead of latches to access or modify critical sections.} Before we discuss latch-free indexes, we first present one of the original data structures from the 1980s designed for in-memory DBMSs. It is \underline{not} a latch-free index but instead provides us with some historical context about what previous systems have done in the past.
+% \rr{} Before we discuss latch-free indexes, we first present 
+% one of the original data structures from the 1980s designed for in-memory DBMSs. It is 
+% \underline{not} a latch-free index but instead provides us with some historical context about what 
+% previous systems have done in the past.
 
 
 %% ==================================================================
 %% T-TREES
 %% ==================================================================
 \section{T-Trees}
-\rr{One of the first attempts for creating a data structure designed for in-memory databases is the T-Tree. It was proposed in 1986 from database researchers at University of Wisconsin--Madison~\cite{P294}.
-It was also used in \dbSys{TimesTen} (originally called \dbSys{Smallbase}~\cite{heytens95}) and other early in-memory DBMSs developed 1990s. Although T-Trees are still used in some DBMSs designed for operating environments with limited memory (e.g., embedded devices), they are not commonly used in large-scale in-memory DBMSs. T-Trees are based on AVL Trees.
-Instead of storing keys in nodes, T-Trees store pointers to their original 
-values. Threads perform breath-first search ordering of keys.}
+The \textbf{T-Tree}~\cite{P294} was one of the first attempts for creating a data structure 
+designed for in-memory databases. It is designed to reduce the size of the index in exchange for 
+more computational overhead during operations. The main idea of a T-Tree is that instead of 
+storing copies of keys in nodes (as in a B+Tree), T-Trees store pointers to the their original 
+values. In order to perform a comparison between the search key and a key in the index, the DBMS 
+must follow the pointer to the tuple to retrieve the key. The overall architecture is similar to an 
+AVL-Tree where threads perform breath-first search ordering of keys.
 
-
+The T-Tree was proposed in 1986 from database researchers at University of 
+Wisconsin--Madison. It is also used in \dbSys{TimesTen} (originally called 
+\dbSys{Smallbase}~\cite{heytens95}) and other early in-memory DBMSs developed in the 1990s.
+Although T-Trees are still used in some DBMSs designed for operating environments with limited 
+memory (e.g., embedded devices), they are not commonly used in large-scale in-memory DBMSs. 
 
 \textbf{Advantages:}
 \begin{itemize}
@@ -38,7 +51,8 @@ values. Threads perform breath-first search ordering of keys.}
     Uses less memory because it does not store keys inside of each node.
     
     \item
-    Inner nodes contain key/value pairs (like B-Tree), which means the DBMS does not need to always traverse to the leaf nodes to find the matching key.
+    Inner nodes contain key/value pairs (like B-Tree), which means the DBMS does not need to always 
+    traverse to the leaf nodes to find the matching key.
 \end{itemize}
 
 \textbf{Disadvantages}:
@@ -50,105 +64,134 @@ values. Threads perform breath-first search ordering of keys.}
     Difficult to implement safe concurrent access.
     
     \item
-    Not cache-friendly because threads chase pointers when scanning range or performing binary search inside of a node.
+    Not cache-friendly because threads chase pointers when scanning range or performing binary 
+    search inside of a node.
 \end{itemize}
 
 %% ==================================================================
 %% SKIP LIST
 %% ==================================================================
-\section{Skip List}
-Skip List is proposed by researchers at the University of Maryland--College Park in the 1990s~\cite{p668-pugh}.
-The index maintains keys in sorted order without requiring global re-balancing.
-
-A skip List uses multiple levels of linked lists with extra pointers that \textbf{skip} over intermediate nodes. It uses multiple levels of linked lists with extra pointers that skip over intermediate nodes:
-\begin{itemize}
-    \item
-    Lowest level is a sorted, singly linked-list of all keys.
-    
-    \item
-    2nd level links every other key.
-    
-    \item
-    3rd level links every fourth key.
-    
-    \item
-    In general, a level has half the keys of one below it.
-\end{itemize}
-    
-The key idea of a skip list is that it is a \textbf{probabilistic data structure}. To insert a new 
-key, the DBMS generates a random number to decide how many levels to add the new key into. 
-Provides approximate O(log n) search times.
-
-It is possible to implement a \textbf{concurrent skip list} using only CAS 
-instructions~\cite{hpugh-concurrent-tr1990}. The data structure only support links in one direction 
-because CAS can only swap one location in memory (i.e., one pointer) atomically.
-If the DBMS invokes operation on the index, it can never ``fail''. A transaction can only abort due 
-to higher-level conflicts.
-
-\textbf{Advantages:}
-\begin{itemize}
-    \item
-    Uses less memory than a B+Tree (only if you do not include reverse pointers). \rr{Skip lists do not store as many pointers as B+Tree does.}
-    
-    \item
-    Insertions and deletions do not require re-balancing. \rr{During insertions, in each level, the DBMS just need to switch pointers for the keys before the key to be inserted.}
-\end{itemize}
-
-\textbf{Disadvantages:}
-\begin{itemize}
-    \item
-    Lots of random memory access (i.e., not cache friendly) because threads have to follow pointers 
-    when moving from one node to the next.
-    
-    \item
-    Does not support reverse range scans (i.e., backwards) because the linked-lists only point in 
-    one direction. Require extra effort to do this.
-\end{itemize}
-
-\subsection*{Operations}
-\textbf{Insert:}
-\begin{itemize}
-    \item
-    The DBMS flips a coin, and every time there is a head, it adds the key into the current level and goes to a higher level. This process ends whenever a tail appears.
-
-    \item
-    To update the pointers of neighboring keys, CAS should happen \textbf{bottom up} along the skip list levels. If a CAS fails, then the index will retry until it succeeds.
-\end{itemize}
-
-\textbf{Delete:}
-\begin{itemize}
-    \item
-    First \textbf{logically} remove a key from the index by setting a flag to tell threads to 
-    ignore.
-    
-    \item
-    Then \textbf{physically} remove the key once we know that no other thread is holding the 
-    reference.
-    
-    \item Deletion should start from the top down to bottom.
-\end{itemize}
+% \section{Skip List}
+% Skip List is proposed by researchers at the University of Maryland--College Park in the 
+% 1990s~\cite{p668-pugh}. The index maintains keys in sorted order without requiring global 
+% re-balancing.
+% 
+% A skip List uses multiple levels of linked lists with extra pointers that \textbf{skip} over 
+% intermediate nodes. It uses multiple levels of linked lists with extra pointers that skip over 
+% intermediate nodes:
+% \begin{itemize}
+%     \item
+%     Lowest level is a sorted, singly linked-list of all keys.
+%     
+%     \item
+%     2nd level links every other key.
+%     
+%     \item
+%     3rd level links every fourth key.
+%     
+%     \item
+%     In general, a level has half the keys of one below it.
+% \end{itemize}
+%     
+% The key idea of a skip list is that it is a \textbf{probabilistic data structure}. To insert 
+% a new key, the DBMS generates a random number to decide how many levels to add the new 
+% key into. Provides approximate O(log n) search times.
+% 
+% It is possible to implement a \textbf{concurrent skip list} using only CAS 
+% instructions~\cite{hpugh-concurrent-tr1990}. The data structure only support links in 
+% one direction because CAS can only swap one location in memory (i.e., one pointer) 
+% atomically. If the DBMS invokes operation on the index, it can never ``fail''. A 
+% transaction can only abort due to higher-level conflicts.
+% 
+% \textbf{Advantages:}
+% \begin{itemize}
+%     \item
+%     Uses less memory than a B+Tree (only if you do not include reverse pointers). \rr{Skip 
+%     lists do not store as many pointers as B+Tree does.}
+%     
+%     \item
+%     Insertions and deletions do not require re-balancing. \rr{During insertions, in each level, 
+%     the DBMS just need to switch pointers for the keys before the key to be inserted.}
+% \end{itemize}
+% 
+% \textbf{Disadvantages:}
+% \begin{itemize}
+%     \item
+%     Lots of random memory access (i.e., not cache friendly) because threads have to follow 
+%     pointers when moving from one node to the next.
+%     
+%     \item
+%     Does not support reverse range scans (i.e., backwards) because the linked-lists only point in 
+%     one direction. Require extra effort to do this.
+% \end{itemize}
+% 
+% \subsection*{Operations}
+% \textbf{Insert:}
+% \begin{itemize}
+%     \item
+%     The DBMS flips a coin, and every time there is a head, it adds the key into the current 
+%     level and goes to a higher level. This process ends whenever a tail appears.
+%     
+%     \item
+%     To update the pointers of neighboring keys, CAS should happen \textbf{bottom up} along the 
+%     skip list levels. If a CAS fails, then the index will retry until it succeeds.
+% \end{itemize}
+% 
+% \textbf{Delete:}
+% \begin{itemize}
+%     \item
+%     First \textbf{logically} remove a key from the index by setting a flag to tell threads to 
+%     ignore.
+%     
+%     \item
+%     Then \textbf{physically} remove the key once we know that no other thread is holding the 
+%     reference.
+%     
+%     \item Deletion should start from the top down to bottom.
+% \end{itemize}
 
 %% ==================================================================
 %% BW-TREE
 %% ==================================================================
-\section{BW-Tree}
-\rr{Since CAS only updates a single address at a time, this limits the design of a data structure. For instance, in a latch-free concurrent skip list, we cannot have reverse pointers; it is also impossible to build a latch-free B+Tree. Threads may need to update sibling pointers during split and merge operations. We need an indirection layer that allows the DBMS to update multiple logical addresses atomically.}
+\section{Bw -Tree}
+The Bw-Tree is a latch-free (``lock-free'') indexing data structure designed by Microsoft Research 
+for the Hekaton project~\cite{bwtree-icde2013}. In latch-free data structures, threads use atomic 
+\textit{compare-and-swap} (CAS) instructions instead of latches to access or modify critical 
+sections.
 
-\rr{BW-Tree is a latch-free indexing data structure designed by Microsoft Research for the Hekaton project~\cite{bwtree-icde2013}. It uses deltas to record changes made to single nodes known as \textbf{Delta Records}. It is similar to a B+Tree except it has two key differences. No updates in place are allowed. Instead, each update to a page produces a new delta that physically points to the \textit{base page}, which acts as the head of the delta chain. The DBMS installs deltas in physical address slot of mapping table using CAS.}
+It is not possible to make a latch-free B+Tree with sibling pointers. This is because threads may 
+need to update sibling pointers during split and merge operations, and it is not possible to use 
+CAS to atomically update multiple addresses. This is the problem that the Bw-Tree solves through an 
+indirection layer.
 
-\rr{BW-Tree also uses an indirection layer, called the \textbf{Mapping Table}, to map (logical) page IDs to their physical address locations in memory. This indirection layer allows for CAS of physical locations of pages. Threads check the mapping table to find out where they need to go when traversing the tree in memory.  If a thread wants to change the location of a page, it can just perform a CAS into a single memory address in the mapping table, and that updates all the pointers.}
+Bw-Tree also uses an indirection layer, called the \textbf{Mapping Table}, to map (logical) page IDs 
+to their physical address locations in memory. This indirection layer allows for CAS of physical 
+locations of pages. Threads check the Mapping Table to find out where they need to go when 
+traversing the tree in memory.  If a thread wants to change the location of a page, it can just 
+perform a CAS into a single memory address in the Mapping Table, and that updates all the pointers.
+
+% Since CAS only updates a single address at a time, this limits the design of a data 
+% structure. For instance, in a latch-free concurrent skip list, 
+The Bw-Tree uses deltas to record changes made to single nodes known as 
+\textbf{Delta Records}. It is similar to a B+Tree except it has two key differences. The first is 
+that the tree does not allow for in-place updates. Instead, each update to 
+a page produces a new delta that physically points to the \textit{base page}, which acts as the 
+head of the delta chain. The DBMS then installs deltas in physical address slot of Mapping Table 
+using CAS.
 
 %% ----------------------------------------------------
 %% Operations
 %% ----------------------------------------------------
 \subsection*{Operations}
+We now describe the two basic operations for accessing and modifying the Bw-Tree.
+
 \textbf{Search:}
 \begin{itemize}
     \item
     Traverse tree like a B+tree, perform comparisons along nodes.
     
     \item
-    If mapping table points to delta chain, stop at first occurrence of search key.
+    If Mapping Table points to delta chain, stop at first occurrence of search key.
     
     \item
     Otherwise, perform binary search on base page.
@@ -163,39 +206,55 @@ to higher-level conflicts.
     Delta physically points to the base page and other deltas.
     
     \item
-    Install delta address in physical address slot of mapping table using CAS.
+    Install delta address in physical address slot of Mapping Table using CAS.
     
     \item
-    During a \textit{contention update}, multiple threads may try to install updates to the same page.
-    Winner thread succeeds, any loser thread must retry their operation.
+    If multiple threads try to install updates to the same 
+    page, then only one thread will succeed in installing their change. All other threads must 
+    retry their operation.
 \end{itemize}
 
 %% ----------------------------------------------------
 %% Garbage Collection
 %% ----------------------------------------------------
 \subsection*{Garbage Collection}
-%% ----------------------------------------------------
-%% Consolidation
-%% ----------------------------------------------------
-\textbf{Consolidation: }\rr{Delta chains grow longer every update, so the DBMS needs a way to compact changes.}
-\begin{itemize}
-    \item Consolidate updates by creating new page with deltas applied. \rr{The deltas are applied in reverse order.}
-    \item CAS-ing the mapping table address ensures no deltas are missed.
-    \item Old page + deltas are marked as garbage.
-\end{itemize}
+As threads modify the index and append new delta records to nodes, the node's will grow in length 
+and make searches take longer. Thus, the DBMS needs to periodically compact these chains.
 
-\rr{After consolidation, the garbage collector needs to recycle deprecated deltas that have been already applied and old pages.} The BW-Tree uses an epoch-based garbage collection scheme. It is also called RCU in Linux.
+The first step is through \textit{cooperative consolidation} where threads recognize that a chain is 
+too long during a normal traversal and they compact it
+
+\textbf{Consolidation:}
+\begin{enumerate}
+    \item
+    The thread a copy of the target page and then applies the deltas in reverse order to the new 
+    page.
+    
+    \item
+    The thread then updates the Mapping Table to have the node id point to memory address of the 
+    new page that it created. Using CAS ensures that the thread does not miss any new deltas 
+    that were added after the consolidation step started.
+    
+    \item
+    Lastly, the thread registers the old page and its delta chain as reclaimable with the tree's 
+    garbage collector.
+\end{enumerate}
+
+After consolidation, the garbage collector needs to recycle old deltas that have been 
+already applied and old pages. The Bw-Tree uses an \textit{epoch-based garbage collection} scheme. 
+This approach is also called \textit{RCU} in Linux and widely used for its internal data structures.
 
 \begin{itemize}
     \item
-    All operations are tagged with an \textbf{epoch}, which is a logical counter that keeps increasing.
+    All operations are tagged with an \textbf{epoch}, which is a logical counter that keeps 
+    increasing.
     
     \item
     Each epoch tracks the threads that are part of it and the objects that can be reclaimed.
     
     \item
-    A thread performing an operation joins an epoch prior to each operation and posts objects that can be reclaimed for 
-    the current epoch (not necessarily the one it joined).
+    A thread performing an operation joins an epoch prior to each operation and posts objects that 
+    can be reclaimed for the current epoch (not necessarily the one it joined).
     
     \item
     Garbage for an epoch is reclaimed only when all threads have exited the epoch.
@@ -205,26 +264,49 @@ to higher-level conflicts.
 %% Structure Modifications
 %% ----------------------------------------------------
 \subsection*{Structure Modifications}
-\rr{BW-Tree is a self-balancing tree, so it needs to perform splits and merges. As delta chains and mapping tables introduce extra pointers, self-balancing operations become more difficult to deal with. We therefore introduce two new types of delta records.}
+Since the Bw-Tree is a self-balancing tree, so it needs to perform splits and merges. There are 
+two additional delta record types to keep track of these changes.
 
-\rr{\textbf{Split Delta Record}: Keeps track of where certain ranges of a key or a page can be found. Marks that a subset of the base page's key range is now located at another page and uses a logical pointer to that new page.}
+\textbf{Split Delta Record}:
+Keeps track of where certain ranges of a key or a page can be 
+found. Marks that a subset of the base page's key range is now located at another page and uses a 
+logical pointer to that new page.
 
-\rr{\textbf{Separator Delta Record}: Shortcut mechanism for higher parts of the tree. Provides a shortcut in the modified page's parent on what ranges to find the new page. Saves time for traversing the delta chain just to find out that the data the DBMS is looking for is actually in a different node.}
+\textbf{Separator Delta Record}:
+Shortcut mechanism for higher parts of the tree. Provides information in the modified page's parent 
+on what ranges to find the new page. This reduces wasted time where threads traverse the delta 
+chain only to find out that the target key is located in a different node.
+
 %% ----------------------------------------------------
-%% CMU's OpenBW-Tree
+%% CMU's OpenBw-Tree
 %% ----------------------------------------------------
-\subsection*{CMU OpenBW-Tree}
-BW-Tree paper from Microsoft is missing important details for implementation, so CMU implemented its own version of BW-Tree\cite{wang18} with additional optimizations:
+\subsection*{CMU OpenBw-Tree}
+The original Bw-Tree paper from Microsoft is missing important details on how to actually 
+implement the data structure. Thus, CMU set out to implement its own version of 
+the Bw-Tree\cite{wang18} for the \dbSys{Peloton} DBMS project. It includes some additional 
+optimizations:
 
-\rr{\textbf{Pre-allocated Delta Records:} Use extra space in each node to store delta records. When there are no more available slots to store new deltas in a node, this triggers a consolidation on that node. This avoids the need for the DBMS to allocate memory for many small objects and avoids running into random locations in memory that may not be in the CPUs caches.}
-        
-\rr{\textbf{Mapping Table Extension:} The mapping table is not implemented as a dynamic hash table, but as a flat array as it is the fastest associative data structure. Allocating the full array for each index is wasteful; instead, we can use virtual memory to allocate the entire array without backing it with physical memory. Even if the entire array is allocated in the virtual memory, it is not allocated in the physical memory unless the entry of the array has been accessed. OS only allocates physical memory when threads access high offsets in the array.}
+\begin{itemize}
+    \item \textbf{Pre-allocated Delta Records:}
+    Use extra space in each node to store delta records. When 
+    there are no more available slots to store new deltas in a node, this triggers a consolidation 
+    on that node. This avoids the need for the DBMS to allocate memory for many small objects and 
+    avoids running into random locations in memory that may not be in the CPUs caches.
+    
+    \item \textbf{Mapping Table Extension:}
+    The Mapping Table is not implemented as a dynamic hash table, 
+    but as a flat array as it is the fastest associative data structure. Allocating the full array 
+    for each index is wasteful; instead, we can use virtual memory to allocate the entire array 
+    without backing it with physical memory. Even if the entire array is allocated in the virtual 
+    memory, it is not allocated in the physical memory unless the entry of the array has been 
+    accessed. OS only allocates physical memory when threads access high offsets in the array.
+\end{itemize}
 
 % ==================================================================
 % BIBLIOGRAPHY
 % ==================================================================
 \newpage
 \bibliographystyle{abbrvnat}
-\bibliography{07-oltpindexes1}
+\bibliography{06-oltpindexes1}
 
 \end{document}
