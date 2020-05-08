@@ -1,0 +1,180 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{17}
+\newcommand{\lecturename}{Parallel Join Algorithms (Hashing)}
+\newcommand{\lecturedata}{2020-03-25}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% Background
+%% ==================================================================
+\section{Background}
+The \textbf{Parallel Join Algorithms} perform a join between two relations on multiple threads simultaneously to speed up operations. The two mainstream approaches today are \textbf{Hash Join} and \textbf{Sort-Merge Join}. For many OLTP DBMSs, they do not implement hash join. But an \textbf{index nested-loop join} with a small number of target tuples is at high-level equivalent to a hash join.
+
+%% ----------------------------------------------------
+%% Join Algorithm Design Goals
+%% ----------------------------------------------------
+\subsection*{Join Algorithm Design Goals}
+\begin{itemize}
+	\item \textbf{Minimize Synchronization}:\\
+	1. Avoid taking latches during execution.
+	
+	\item \textbf{Minimize Memory Access Cost}:\\
+	1. Ensure that data is always local to worker thread.\\
+	2. Reuse data while it exists in CPU cache: For \textbf{Non-Random Access (Scan)}, clustering data to a cache line and execute more operations per cache line. For \textbf{Random Access (Lookups)}, partition data to fit in cache + TLB. 
+\end{itemize}
+
+
+%% ==================================================================
+%% Parallel Hash Joins
+%% ==================================================================
+\section{Parallel Hash Joins}
+Hash join is the most important operator in a DBMS for OLAP workloads. It is important that we speed up our DBMS's join algorithm by taking advantage of multiple cores. We want to keep all cores busy, without becoming memory bound.
+
+%% ----------------------------------------------------
+%% Hash Join
+%% ----------------------------------------------------
+\subsection*{Hash Join (R $\bowtie$ S)}
+The Hash Join can be divided into three phases\cite{Schuh2016}:
+\begin{itemize}
+    \item \textbf{Phase \#1: Partition (optional)}:
+    Divide the tuples of R and S into sets using a hash on the join key.
+    
+    \item \textbf{Phase \#2: Build}:
+    Scan relation R and create a hash table on join key.
+    
+    \item \textbf{Phase \#3: Probe}:
+    For each tuple in S, look up its join key in hash table for R. 
+    If a match is found, output combined tuple.
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Partition Phase
+%% ----------------------------------------------------
+\subsection*{Partition Phase}
+Split the input relations into partitioned buffers by hashing the tuples’ join key(s). Ideally the cost of partitioning is less than the cost of cache misses during build phase. Sometimes called hybrid hash join / radix hash join.
+
+Contents of buffers depends on storage model: NSM: Usually the entire tuple. DSM: Only the columns needed for the join + offset.
+
+There are two general approaches to paritioning:
+\begin{itemize}
+	\item \textbf{Non-Blocking Partitioning}: 
+	Only scan the input relation once.
+	Produce output incrementally on the fly.
+	\begin{itemize}
+		\item \textbf{Approach \#1: Shared Partitions}: 
+		Single global set of partitions that all threads update.
+		Must use a latch to synchronize threads.
+		
+		\item \textbf{Approach \#2: Private Partitions}: 
+		Each thread has its own set of partitions.
+		Must consolidate them after all threads finish.
+	\end{itemize}
+	
+	\item \textbf{Blocking Partitioning (Radix)}: 
+	Scan the input relation multiple times:
+	\begin{itemize}
+		\item \textbf{Step \#1}:
+		Scan R and compute a histogram of the number of tuples per hash key for the radix at some offset.
+		
+		\item \textbf{Step \#2}
+		Use this histogram to determine output offsets by computing the prefix sum.
+		
+		\item \textbf{Step \#3}:
+		Scan R again and partition them according to the hash key.
+	\end{itemize}
+
+	Only materialize results all at once.
+	Sometimes called radix hash join.
+
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Build Phase
+%% ----------------------------------------------------
+\subsection*{Build Phase}
+The threads are then to scan either the tuples (or partitions) of R. For each tuple, hash the join key attribute for that tuple and add it to the appropriate bucket in the hash table. The buckets should only be a few cache lines in size.
+
+There are two design decisions for a hash table:
+\begin{itemize}
+	\item \textbf{Hash Function}:
+	How to map a large key space into a smaller domain.
+	Trade-off between being fast vs. collision rate.
+	
+	\item \textbf{Hashing Scheme}:
+	How to handle key collisions after hashing.
+	Trade-off between allocating a large hash table vs. additional instructions to find/insert keys.
+	
+	Some common approaches include:
+	\begin{itemize}
+		\item \textbf{Chained Hashing}\\
+		Maintain a linked list of buckets for each slot in the hash table.
+		Resolve collisions by placing all elements with the same hash key into the same bucket.
+		To determine whether an element is present, hash to its bucket and scan for it.
+		Insertions and deletions are generalizations of lookups.
+		
+		\item \textbf{Linear Probe Hashing}\\
+		Single giant table of slots.
+		Resolve collisions by linearly searching for the next free slot in the table.
+		To determine whether an element is present, hash to a location in the table and scan for it.
+		Must store the key in the table to know when to stop scanning.
+		Insertions and deletions are generalizations of lookups.
+		
+		\item \textbf{Robin Hood Hashing}\\
+		Variant of linear probe hashing that steals slots from "rich" keys and give them to "poor" keys.~\cite{Celis1985}
+		Each key tracks the number of positions they are from where its optimal position in the table.
+		On insert, a key takes the slot of another key if the first key is farther away from its optimal position than the second key.
+		
+		\item \textbf{Hopscotch Hashing}\\
+		Variant of linear probe hashing where keys can move between positions in a neighborhood~\cite{Herlihy2008}.
+		A neighborhood is contiguous range of slots in the table.
+		The size of a neighborhood is a configurable constant.
+		A key is guaranteed to be in its neighborhood or not exist in the table.
+		
+		\item \textbf{Cuckoo Hashing}\\
+		Use multiple tables with different hash functions.
+		On insert, check every table and pick anyone that has a free slot.
+		If no table has a free slot, evict the element from one of them and then re-hash it find a new location.
+		Look-ups are always O(1) because only one location per hash table is checked.
+		
+		Threads have to make sure that they don’t get stuck in an infinite loop when moving keys.
+		If we find a cycle, then we can rebuild the entire hash tables with new hash functions.
+		With two hash functions, we (probably) won’t need to rebuild the table until it is at about 50\% full.
+		With three hash functions, we (probably) won’t need to rebuild the table until it is at about 90\% full.
+	\end{itemize}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Probe Phase
+%% ----------------------------------------------------
+\subsection*{Probe Phase}
+For each tuple in S, hash its join key and check to see whether there is a match for each tuple in corresponding bucket in the hash table constructed for R. If inputs were partitioned, then assign each thread a unique partition. Otherwise, synchronize their access to the cursor on S.
+
+\textbf{Bloom Filter}: Create a Bloom Filter during the build phase when the key is likely to not exist in the hash table~\cite{Ducanu2013}. Threads check the filter before probing the hash table. This will be faster since the filter will fit in CPU caches. Sometimes called sideways information passing.
+
+
+%% ==================================================================
+%% Benchmarks Results
+%% ==================================================================
+\section{Benchmarks Results}
+In a real DBMS, the optimizer will select what it thinks are good values based on what it knows about the data (and maybe hardware).
+
+Partitioned-based joins outperform no-partitioning algorithms is most settings~\cite{Blanas2011}, but it is non-trivial to tune it correctly. Every DBMS vendor picks one hash join implementation and does not try to be adaptive.
+
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{17-parallel1}
+
+
+
+\end{document}
