@@ -1,0 +1,125 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{20}
+\newcommand{\lecturename}{Optimizer Implementation (Top-Down vs. Bottom-Up)}
+\newcommand{\lecturedata}{2020-04-06}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% Logical Query Optimization
+%% ==================================================================
+\section{Logical Query Optimization}
+Transform a logical plan into an equivalent logical plan using pattern matching rules. The goal is to increase the likelihood of enumerating the optimal plan in the search. Cannot compare plans because there is no cost model but can "direct" a transformation to a preferred side.
+
+There are several approaches for Logical Query Optimization:
+\begin{itemize}
+	\item \textbf{Split Conjunctive Predicates}: 
+	Decompose predicates into their simplest forms to make it easier for the optimizer to move them around.
+	
+	\item \textbf{Predicate Pushdown}: 
+	Move the predicate to the lowest point in the plan after Cartesian products.
+	
+	\item \textbf{Replace Cartesian Products with Joins}:
+	Replace all Cartesian Products with inner joins using the join predicates.
+	
+	\item \textbf{Projection Pushdown}:
+	Eliminate redundant attributes before pipeline breakers to reduce materialization cost.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Physical Query Optimization
+%% ----------------------------------------------------
+\subsection*{Physical Query Optimization}
+Transform a query plan's logical operators into physical operators. Add more execution information. Select indexes / access paths. Choose operator implementations. Choose when to materialize (i.e., temp tables). This stage must support cost model estimates.
+
+
+%% ==================================================================
+%% Dynamic Programming Optimizer
+%% ==================================================================
+\section{Dynamic Programming Optimizer}
+Model the query as a hypergraph and then incrementally expand to enumerate new plans~\cite{Moerkotte2008}. Algorithm Overview: Iterate connected sub-graphs and incrementally add new edges to other nodes to complete query plan. Use rules to determine which nodes the traversal is allowed to visit and expand.
+
+%% ----------------------------------------------------
+%% Plan Enumeration
+%% ----------------------------------------------------
+\subsection*{Plan Enumeration}
+There are two approaches for Plan Enumeration~\cite{Moerkotte2013}:
+\begin{itemize}
+	\item \textbf{Transformation}:
+	Modify some part of an existing query plan to transform it into an alternative plan that is equivalent.
+	
+	\item \textbf{Generative}:
+	Assemble building blocks to generate a query plan.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Cascade Optimizer
+%% ----------------------------------------------------
+\subsection*{Cascade Optimizer}
+Object-oriented implementation of the Volcano query optimizer~\cite{Graefe1995}. Supports simplistic expression re-writing through a direct mapping function rather than an exhaustive search.
+
+Optimization tasks as data structures~\cite{Xu1998}. Rules to place property enforcers. Ordering of moves by promise. Predicates as logical/physical operators.
+
+An \textbf{expression} is an operator with zero or more input expressions.
+
+A \textbf{group} is a set of logically equivalent logical and physical expressions that produce the same output. All logical forms of an expression. All physical expressions that can be derived from selecting the allowable physical operators for the corresponding logical forms.
+
+Instead of explicitly instantiating all possible expressions in a group, the optimizer implicitly represents redundant expressions in a group as a \textbf{multi-expression}. This reduces the number of transformations, storage overhead, and repeated cost estimations.
+
+A \textbf{rule} is a transformation of an expression to a logically equivalent expression. Transformation Rule: Logical to Logical. Implementation Rule: Logical to Physical. Each rule is represented as a pair of attributes: \textbf{Pattern}: Defines the structure of the logical expression that can be applied to the rule. \textbf{Substitute}: Defines the structure of the result after applying the rule.
+
+\textbf{Memo Table}: Stores all previously explored alternatives in a compact graph structure / hash table. Equivalent operator trees and their corresponding plans are stored together in groups. Provides memoization, duplicate detection, and property + cost management.
+
+\textbf{Principle of Optimality}~\cite{Shapiro2001}: Every sub-plan of an optimal plan is itself optimal. This allows the optimizer to restrict the search space to a smaller set of expressions. The optimizer never has to consider a plan containing sub-plan P1 that has a greater cost than equivalent plan P2 with the same physical properties.
+
+
+
+%% ==================================================================
+%% Cascade Implementations
+%% ==================================================================
+\section{Cascade Implementations}
+
+%% ----------------------------------------------------
+%% Pivotal Orca
+%% ----------------------------------------------------
+\subsection*{Pivotal Orca}
+Standalone Cascades implementation~\cite{Soliman2014}. Originally written for Greenplum. Extended to support HAWQ. A DBMS can use Orca by implementing API to send catalog + stats + logical plans and then retrieve physical plans. Supports multi-threaded search.
+
+There are two engineering issues with Orca:
+\begin{itemize}
+	\item \textbf{Remote Debugging}:
+	Automatically dump the state of the optimizer (with inputs) whenever an error occurs.
+	The dump is enough to put the optimizer back in the exact same state later for further debugging.
+	
+	\item \textbf{Optimizer Accuracy}:
+	Automatically check whether the ordering of the estimate cost of two plans matches their actual execution cost.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Apache Calcite
+%% ----------------------------------------------------
+\subsection*{Apache Calcite}
+Standalone extensible query optimization framework for data processing systems~\cite{Begoli2018}. Support for pluggable query languages, cost models, and rules. Does not distinguish between logical and physical operators. Physical properties are provided as annotations. Originally part of LucidDB.
+
+%% ----------------------------------------------------
+%% MemSQL Optimizer
+%% ----------------------------------------------------
+\subsection*{MemSQL Optimizer}
+Rewriter: Logical-to-logical transformations with access to the cost-model.\\
+Enumerator: Logical-to-physical transformations. Mostly join ordering.\\
+Planner: Convert physical plans back to SQL. Contains MemSQL-specific commands for moving data.
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{20-optimizer2}
+
+\end{document}
