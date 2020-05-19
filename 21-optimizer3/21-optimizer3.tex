@@ -1,0 +1,94 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{21}
+\newcommand{\lecturename}{Optimizer Implementation (Alternative Approaches)}
+\newcommand{\lecturedata}{2020-04-13}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% Background
+%% ==================================================================
+\section{Background}
+The best plan for a query can change as the database evolves over time because of physical design changes, data modifications, prepared statement parameters, and statistics updates. The query optimizers that we have talked about so far all generate a plan for a query before the DBMS executes a query.
+
+The most common problem in a query plan is incorrect join orderings. This occurs because of inaccurate cardinality estimations that propagate up the plan. If the DBMS can detect how bad a query plan is, then it can decide to adapt the plan rather than continuing with the current sub-optimal plan.
+
+The reason why good plans go bad is estimating the execution behavior of a plan to determine its quality relative to other plans. These estimations are based on a static summarizations of the contents of the database and its operating environment like statistical models, histograms, sampling, hardware performance, concurrent operations.
+
+%% ==================================================================
+%% Adaptive Query Optimization
+%% ==================================================================
+\section{Adaptive Query Optimization}
+The Adaptive Query Optimization modifies the execution behavior of a query by generating multiple individual complete plans or embedding multiple sub-plans at materialization points~\cite{Babu2005}. It uses information collected during query execution to improve the quality of these plans. It can use this data for planning one query or merge the it back into the DBMS's statistics catalog.
+
+There are three approaches for Adaptive Query Optimization:
+
+%% ----------------------------------------------------
+%% Modify Future Invocations
+%% ----------------------------------------------------
+\subsection*{Approach \#1: Modify Future Invocations}
+The DBMS monitors the behavior of a query during execution and uses this information to improve subsequent invocations.
+
+There are two approaches:
+\begin{itemize}
+	\item \textbf{Plan Correction}: 
+	Reversion-Based Plan Correction tracks the history of cost estimations, query plan, and runtime metrics of query invocations. 
+	If the DBMS generates a new plan for a query, it checks whether that plan performs worse than
+	the previous plan. 
+	If it regresses, then it switches back to the cheaper plans.
+	
+	\item \textbf{Feedback Loop}
+\end{itemize}
+
+\textbf{Microsoft - Plan Stitching}:
+Plan Stitching combines useful sub-plans from queries to create potentially better plans~\cite{Ding2018}. Sub-plans do not need to be from the same query. The DBMS can still use sub-plans even if overall plan becomes invalid after a physical design change. The system uses a dynamic programming search (bottom-up) that is not guaranteed to find a better plan.
+
+\textbf{\dbSys{Redshift} - Codegen Stitching}:
+Redshift uses a transpilation-based codegen engine. To avoid the compilation cost for every query, the DBMS cache subplans and then combines them at runtime for new queries.
+
+\textbf{\dbSys{IBM DB2} - Learning Optimizer}:
+IBM DB2 updates table statistics as the DBMS scans a table during normal query processing~\cite{Stillger2001}. It checks whether the optimizer’s estimates match what it encounters in the real data and incrementally updates them.
+%% ----------------------------------------------------
+%% Replan Current Invocation
+%% ----------------------------------------------------
+\subsection*{Approach \#2: Replan Current Invocation}
+If the DBMS determines that the observed execution behavior of a plan is far from its estimated behavior, then it can halt execution and generate a new plan for the query.
+The DBMS can either \textbf{starts over from scratch} or \textbf{keeps intermediate results}.
+
+\textbf{QuickStep - Lookahead Info Passing}:
+Llokahead Info Passing first computes Bloom filters on dimension tables. It probes these filters using fact table tuples to determine the ordering of the joins. LIP only supports left-deep join trees on star schemas.
+
+%% ----------------------------------------------------
+%% Plan Pivot Points
+%% ----------------------------------------------------
+\subsection*{Approach \#3: Plan Pivot Points}
+The optimizer embeds alternative sub-plans at materialization points in the query plan. The plan includes "pivot" points that guides the DBMS towards a path in the plan based on the observed statistics.
+
+There are two approaches for Plan Pivot Points:
+\begin{itemize}
+	\item \textbf{Parametric Optimization}:
+	Generate multiple sub-plans per pipeline in the query~\cite{Graefe1989}.
+	Add a choose-plan operator that allows the DBMS to select which plan to execute at runtime.
+	First introduced as part of the Volcano project in the 1980s.
+	
+	\item \textbf{Proactive Reoptimization}:
+	Generate multiple sub-plans within a single pipeline~\cite{Babu2005'}.
+	Use a switch operator to choose between different sub-plans during execution in the pipeline.
+	Computes bounding boxes to indicate the uncertainty of estimates used in plan. 
+	
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{21-optimizer3}
+
+\end{document}
