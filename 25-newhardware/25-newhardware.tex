@@ -1,0 +1,181 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{25}
+\newcommand{\lecturename}{Databases on New Hardware}
+\newcommand{\lecturedata}{2020-04-27}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% Background
+%% ==================================================================
+\section{Background}
+People have been thinking about using hardware to accelerate DBMSs for decades:
+\begin{itemize}
+	\item \textbf{1980s}: Database Machines
+	\item \textbf{2000s}: FPGAs + Appliances
+	\item \textbf{2010s}: FPGAs + GPUs
+	\item \textbf{2020s}: PM + FPGAs + GPUs + CSAs + More!
+\end{itemize}
+
+
+%% ==================================================================
+%% Persistent Memory
+%% ==================================================================
+\section{Persistent Memory}
+Emerging storage technology that provide low latency read/writes like DRAM, but with persistent writes and large capacities like SSDs, aka Storage-class Memory, Non-Volatile Memory. First devices are block-addressable (NVMe). Later devices are byte-addressable.
+
+%% ----------------------------------------------------
+%% MERISTORS
+%% ----------------------------------------------------
+\subsection*{MERISTORS}
+In 1971, Leon Chua at Berkeley predicted the existence of a fourth fundamental element in addition to Capacitor, Resistor, and Inductor. A two-terminal device whose resistance depends on the voltage applied to it, but when that voltage is turned off it permanently remembers its last resistive state.
+
+A team at HP Labs led by Stanley Williams stumbled upon a nano-device that had weird properties that they could not understand~\cite{Williams2008}. It wasn’t until they found Chua’s 1971 paper that they realized what they had invented.
+
+%% ----------------------------------------------------
+%% Phase-Change Memory (PRAM)
+%% ----------------------------------------------------
+\subsection*{Phase-Change Memory (PRAM)}
+Storage cell is comprised of two metal electrodes separated by a resistive heater and the phase change material (chalcogenide)~\cite{Lee2010}. The value of the cell is changed based on how the material is heated: A short pulse changes the cell to a ‘0’. A long, gradual pulse changes the cell to a ‘1’.
+
+%% ----------------------------------------------------
+%% Resistive RAM (ReRAM)
+%% ----------------------------------------------------
+\subsection*{Resistive RAM (ReRAM)}
+Two metal layers with two TiO2 layers in between~\cite{Williams2008}. Running a current one direction moves electrons from the top TiO2 layer to the bottom, thereby changing the resistance. Potential programmable storage fabric. Bertrand Russell’s Material Implication Logic.
+
+%% ----------------------------------------------------
+%% Magnetoresistive RAM (MRAM)
+%% ----------------------------------------------------
+\subsection*{Magnetoresistive RAM (MRAM)}
+Stores data using magnetic storage elements instead of electric charge or current flows. Spin-Transfer Torque (STT-MRAM) is the leading technology for this type of PM. Supposedly able to scale to very small sizes (10nm) and have SRAM latencies.
+
+
+%% ==================================================================
+%% PM for Database Systems
+%% ==================================================================
+\section{PM for Database Systems}
+Block-addressable PM is not that interesting. Byte-addressable PM will be a game changer but will require some work to use correctly. In-memory DBMSs will be better positioned to use byteaddressable PM. Disk-oriented DBMSs will initially treat PM as just a faster SSD.
+
+%% ----------------------------------------------------
+%% Storage & Recovery Methods
+%% ----------------------------------------------------
+\subsection*{Storage \& Recovery Methods}
+Understand how a DBMS will behave on a system that only has byte-addressable PM~\cite{Arulraj2015}. Develop PM-optimized implementations of standard DBMS architectures. Based on the N-Store prototype DBMS.
+\begin{itemize}
+	\item \textbf{Synchronization}: 
+	Existing programming models assume that any write to memory is non-volatile. 
+	CPU decides when to move data from caches to DRAM. 
+	The DBMS needs a way to ensure that data is flushed from caches to PM.
+	
+	The PM-aware memory allocator writes back CPU cache lines to PM using the CLFLUSH instruction.
+	It then issues a SFENCE instruction to wait for the data to become durable on PM.
+	
+	\item \textbf{Naming}:
+	If the DBMS process restarts, we need to make sure that all the pointers for in-memory data point to the same data.
+	
+	The PM-aware memory allocator ensures that virtual memory addresses
+	assigned to a memory-mapped region never change even
+	after the OS or DBMS restarts.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% DBMS Engine Architecture
+%% ----------------------------------------------------
+\subsection*{DBMS Engine Architecture}
+There are three choices for DBMS Engine Architecture:
+\begin{itemize}
+	\item \textbf{In-place Updates}: 
+	Table heap with a write-ahead log + snapshots.
+	Example: \dbSys{VoltDB}
+	
+	\item \textbf{Copy-on-Write}:
+	Create a shadow copy of the table when updated.
+	No write-ahead log.
+	Example: \dbSys{LMDB}
+	
+	\item \textbf{Log-structured}:
+	All writes are appended to log. No table heap.
+	Example: \dbSys{RocksDB}
+\end{itemize}
+
+%% ----------------------------------------------------
+%% PM-Optimized Architectures
+%% ----------------------------------------------------
+\subsection*{PM-Optimized Architectures}
+Leverage the allocator’s non-volatile pointers to only record what changed rather than how it changed. The DBMS only must maintain a transient UNDO log for a txn until it commits. Dirty cache lines from an uncommitted txn can be flushed by hardware to the memory controller. No REDO log because we flush all the changes to PM at the time of commit. 
+
+
+%% ==================================================================
+%% Write-Behind Logging
+%% ==================================================================
+\section{Write-Behind Logging}
+WAL serves two purposes: Transform random writes into sequential log writes. Support transaction rollback. Design makes sense for disks with slow random writes. 
+
+But PM supports fast random writes. Directly write data to the multi-versioned database. Only record meta-data about committed txns in log.
+
+%% ----------------------------------------------------
+%% Write-Behind Logging
+%% ----------------------------------------------------
+\subsection*{Write-Behind Logging}
+PM-centric logging protocol that provides instant recovery and minimal duplication overhead~\cite{Arulraj2016}. Directly propagate changes to the database. Only record meta-data in log. Recover the database almost instantaneously. Need to record meta-data about in-flight transactions. In case of failure, ignore their effects.
+
+DBMS assigns timestamps to transactions. Get timestamps within same group commit timestamp range to identify and ignore effects of in-flight txns. Use failed group commit timestamp range: DBMS uses range during tuple visibility checks. Ignores tuples created or updated within this range. UNDO is implicitly done via visibility checks.
+
+Recovery consists of only analysis phase: The DBMS can immediately start processing transactions after restart with explicit UNDO/REDO phases.
+
+Garbage collection eventually kicks in to remove the physical versions of uncommitted transactions. Using timestamp range information in write-behind log. After this finishes, no need to do extra visibility checks.
+
+
+%% ==================================================================
+%% GPU Acceleration
+%% ==================================================================
+\section{GPU Acceleration}
+GPUs excel at performing (relatively simple) repetitive operations on large amounts of data over multiple streams of data. Target operations that do not require blocking for input or branches: Good: Sequential scans with predicates. Bad: B+Tree index probes. GPU memory is not cache coherent with CPU memory.
+
+There are three choices for GPU Acceleration:
+\begin{itemize}
+	\item \textbf{Entire Database}:
+	Store the database in the GPU(s) VRAM.
+	All queries perform massively parallel seq scans.
+	
+	\item \textbf{Important Columns}:
+	Return the offsets of records that match the portion of the query that accesses GPU-resident columns.
+	Must materialize full results in CPU.
+	
+	\item \textbf{Streaming}:
+	Transfer data from CPU to GPU on the fly. 
+\end{itemize}
+
+
+%% ==================================================================
+%% Hardware Transactional Memory
+%% ==================================================================
+\section{Hardware Transactional Memory}
+Create critical sections in software that are managed by hardware~\cite{Makreshanski2015}. Leverages same cache coherency protocol to detect transaction conflicts. Intel x86: Transactional Synchronization Extensions. Read/write set of transactions must fit in L1 cache. This means that it is not useful for general purpose txns. It can be used to create latch-free indexes.
+
+There are two HTM Programming Models:
+\begin{itemize}
+	\item \textbf{Hardware Lock Elision (HLE)}:
+	Optimistically execute critical section by eliding the write to a lock so that it appears to be free to other threads.
+	If there is a conflict, re-execute the code but take locks the second time.
+	
+	\item \textbf{Restricted Transactional Memory (RTM)}:
+	Like HLE but with an optional fallback codepath that the CPU jumps to if the txn aborts.
+\end{itemize}
+
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{25-newhardware}
+
+\end{document}
