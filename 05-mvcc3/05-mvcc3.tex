@@ -5,6 +5,8 @@
 Collection)}
 \newcommand{\lecturedata}{2020-01-29}
 
+\newcommand{\mvccField}[1]{\texttt{#1}\xspace}
+
 \usepackage{../dbnotes}
 
 \begin{document}
@@ -17,7 +19,7 @@ Collection)}
 %% ==================================================================
 \section{Introduction}
 MVCC maintains multiple physical versions of a single logical object in the database. Over time, old 
-versions will become invisible to active transactions under \isoLevel{Snapshot Isolation}. These 
+versions will become invisible to active transactions under snapshot isolation. These 
 are \textit{reclaimable} versions that the DBMS must remove in order to reclaim memory.
 
 Up until now, we have assumed that transactions (OLTP) will complete in a short amount of time. This 
@@ -118,7 +120,7 @@ between the ability to reclaim versions sooner versus computational overhead.
     
     \item \textbf{Group Version:}
     The DBMS organizes versions into groups and reclaim all of them together when the newest tuple 
-    in that group is no longer visible to any active tranaction. This grouping reduces overhead, 
+    in that group is no longer visible to any active transaction. This grouping reduces overhead, 
     but may delay reclamation.
     
     \item \textbf{Tables:}
@@ -144,39 +146,39 @@ generate false negatives, but this is allowable as long as the versions are even
     are safe to reclaim. This approach is the easiest to implement and execute.
     
     \item \textbf{Interval:}
-    Introduced by SAP HANA~\cite{jlee2016sap} but also used in HyPer~\cite{bottcher19}. The 
-    DBMS excises timestamp ranges that are not visible. More difficult to identify ranges. 
+    The DBMS identifies ranges of timestamps that are not visible to any active transaction. The 
+    lower-bound of this range may not be the lowest timestamp of any active transaction, but range 
+    is not visible under snapshot isolation. This approach was first introduced by SAP 
+    HANA~\cite{jlee2016sap}, but it is also used in HyPer~\cite{bottcher19}.  
 \end{itemize}
 
 % ==================================================================
 % BLOCK COMPACTION
 % ==================================================================
 \section{Block Compaction}
-If the application deletes a tuple, then the slots occupied by that tuple's versions become 
-available. The DBMS should try to reuse those slots to conserve space. It should always try to 
-reuse variable-length data slots because (?), and sometimes fixed-length slots. The DBMS also need 
-to deal with the case where the application deletes a bunch of tuples in a short amount of time, 
-which in turn generates a large amount of potentially reusable space.
+If the application deletes a tuple, then the slots occupied by that tuple's versions are available 
+to store new data once the versions' storage is reclaimed. Ideally the DBMS should try to reuse 
+those slots to conserve memory. The DBMS also need to deal with the case where the application 
+deletes a bunch of tuples in a short amount of time, which in turn generates a large amount of 
+potentially reusable space.
 
 %% ----------------------------------------------------
 % MVCC Deleted Tuples
 %% ----------------------------------------------------
 \subsection*{MVCC Deleted Tuples}
-The DBMS needs to figure out what to deal with empty slots after tuples have been deleted.
+The DBMS needs to determine what to do with empty slots after it reclaims tuple versions.
+
 \begin{itemize}
-    \item \textbf{\# 1 - Reuse Slot}
-\begin{itemize}
-    \item Allow workers to insert new tuples in the empty slots.
-    \item Obvious choice for append-only storage since there is no distinction between versions.
-    \item Destroys temporal locality of tuples in delta storage.
-\end{itemize}
-    \item \textbf{\# 2 - Leave Slot Unoccupied}
-    \begin{itemize}
-        \item Workers can only insert new tuples in slots that were not previously occupied.
-        \item Ensures that tuples in the same block were inserted into the database at around the 
-same time.
-        \item Need an extra mechanism to fill holes.
-    \end{itemize}
+    \item \textbf{Reuse Slot:}
+    The DBMS allow workers to insert new tuples in the empty slots. This approach is an obvious 
+    choice for append-only storage since there is no distinction between versions. The problem, 
+    however, is that it destroys temporal locality of tuples in delta storage.
+
+    \item \textbf{Leave Slot Unoccupied:}
+    With this approach, workers can only insert new tuples in slots that were not previously 
+    occupied. This ensures that tuples in the same block are inserted into the database at around 
+    the same time. Overtime the DBMS will need to perform a background compaction step to combine 
+    together less-than-full blocks of data 
 \end{itemize}
 
 %% ----------------------------------------------------
@@ -192,16 +194,22 @@ Ideally the DBMS will want to store tuples that are likely to be accessed togeth
 of time together in the same block. This will make operations on blocks (e.g., compression) easier 
 to execute because tuples that are unlikely to be updated will be within the same block.
 
-%% ----------------------------------------------------
-% Block Compaction Targets
-%% ----------------------------------------------------
-\subsection*{Block Compaction Targets}
+There are different approaches for identifying what blocks to compact:
 \begin{enumerate}
-    \item \textbf{Time Since Last Update:} Leverage the \sql{BEGIN-TS} in each tuple
-    \item \textbf{Time Since Last Access:} Expensive to maintain unless tuple has \sql{READ-TS}.
-    \item \textbf{Application-level Semantics:} Tuples from the same table that are related to each 
-other according to some higher-level construct. Difficult for the DBMS to figure out automatically.
+    \item \textbf{Time Since Last Update:}
+    Leverage the \mvccField{BEGIN-TS} field in each tuple to determine when the version was created.
+    
+    \item \textbf{Time Since Last Access:}
+    Track the timestamp of every read access to a tuple (e.g., the \mvccField{READ-TS} in the basic 
+    T/O concurrency control protocol). This expensive to maintain because now every read 
+    operation has to perform a write.
+    
+    \item \textbf{Application-level Semantics:} 
+    The DBMS determines how tuples from the same table are related to each 
+    other according to some higher-level construct. This is difficult for the DBMS to figure out 
+    automatically unless their are schema hints available (e.g., foreign keys).
 \end{enumerate}
+
 % ==================================================================
 % Truncate Operation
 % ==================================================================
@@ -213,8 +221,9 @@ overhead. \sql{TRUNCATE} removes all tuples in a table, which is the same as \sq
 The fastest way to execute \sql{TRUNCATE} is to drop the table and then create it again. This 
 invalidates all versions within that table. We would not need to track the visibility of individual 
 tuples. The GC will free all memory when there are no active transactions that exist before the drop 
-operation. If the catalog is transnational, then this is easy to do since all the operations on 
+operation. If the catalog is transactional, then this is easy to do since all the operations on 
 metadata are atomic.
+
 % ==================================================================
 % BIBLIOGRAPHY
 % ==================================================================

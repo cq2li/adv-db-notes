@@ -1,0 +1,121 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lecturenumber}{16}
+\newcommand{\lecturename}{Vectorization vs. Compilation}
+\newcommand{\lecturedata}{2018-01-24}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% Observation
+%% ==================================================================
+\section{Observation}
+Vectorization can speed up query performance.Compilation can speed up query performance. We have 
+not discussed which approach is better and under what conditions.
+\begin{itemize}
+    \item 
+    \dbSys{Vectorwise} - Precompiled Primitives
+    
+    Pre-compiles thousands of “primitives” that perform basic operations on typed data~\cite{Rundefinedducanu2013}. Using simple kernels for each primitive means that they are easier to vectorize.
+    
+    The DBMS then executes a query plan that invokes these primitives at runtime.→Function calls 
+    are amortized over multiple tuples
+    
+    \item
+    \dbSys{HyPer} - JIT Query Compilation
+    
+    Compile queries in-memory into native code using the LLVM toolkit~\cite{Neumann2011}.
+    
+    Organizes query processing in a way to keep a tuple in CPU registers for as long as possible.  
+    Bottom-to-top / push-based query processing model. Not vectorizable (as originally described).
+\end{itemize}
+
+%% ==================================================================
+%% Vectorization vs. Compilation
+%% ==================================================================
+\section{Vectorization vs. Compilation}
+Single test-bed system to analyze the trade-offs between vectorized execution and query 
+compilation~\cite{Kersten2018}. Implemented high-level algorithms the same in each system but 
+varied the implementation details. Example: Murmur2 vs. CRC Hash Functions
+\begin{itemize}
+    \item 
+    \textbf{Approach \#1: Tectorwise}:
+    Break operations into pre-compiled primitives.
+    Have to materialize the output of primitives at each step. 
+    
+    \item 
+    \textbf{Approach \#2: Typer}:
+    Push-based processing model with JIT compilation.
+    Process a single tuple up entire pipeline without materializing the intermediate results.
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Main Findings
+%% ----------------------------------------------------
+\subsection*{Main Findings}
+Both models are efficient and achieve roughly the same performance. Data-centric is better for 
+computational queries with few cache misses. Vectorization is slightly better at hiding cache miss 
+latencies.
+\begin{itemize}
+	\item 
+	\textbf{SIMD Performance}
+	
+	Evaluate vectorized branchless selection and hash probe in Tectorwise. They use AVX-512 because 
+	it includes new instructions to make it easier to implement algorithms using vertical 
+	vectorization. 
+	
+	\item 
+	\textbf{Auto-Vectorization}
+	
+	Measure how well the compiler is able to vectorize the Vectorwiseprimitives. 
+	Targets: GCC v7.2, Clang v5.0, ICC v18.
+	
+	ICC was able to vectorize the most primitives using AVX-512:
+	Vectorized: Hashing, Selection, Projection
+	Not Vectorized: Hash Table Probing, Aggregation
+\end{itemize}
+
+The paper (partially) assumes that vectorization and compilation are mutually exclusive. \dbSys{HyPer} fuses operators together so that they work on a single tuple a time to maximize CPU register reuse and minimize cache misses.
+
+%% ==================================================================
+%% Relaxed Operator Fusion
+%% ==================================================================
+\section{Relaxed Operator Fusion}
+Each pipeline fuses operators together into loop. Each pipeline is a tuple-at-a-time process.
+Fusion inhibits some optimizations:→Unable to look ahead in tuple stream. Unable to overlap 
+computation and memory access.
+
+%% ----------------------------------------------------
+%% Relaxed Operator Fusion
+%% ----------------------------------------------------
+\subsection*{Relaxed Operator Fusion}
+Vectorized processing model designed for query compilation execution engines~\cite{Menon2017}. Decompose pipelines into stages that operate on vectors of tuples. Each stage may contain multiple operators. Communicate through cache-resident buffers. Stages are granularity of vectorization + fusion.
+
+%% ----------------------------------------------------
+%% ROF Prefetching
+%% ----------------------------------------------------
+\subsection*{ROF Prefetching}
+The DBMS can tell the CPU to grab the next vector while it works on the current batch. Prefetch-enabled operators define start of new stage. Hides the cache miss latency.
+Any prefetching technique is suitable→Group prefetching, software pipelining, AMAC. Group prefetching works and is simple to implement.
+
+%% ==================================================================
+%% Conclusion
+%% ==================================================================
+\section{Conclusion}
+No major performance difference between the \dbSys{Vectorwise} and \dbSys{HyPer} approaches for all queries. 
+ROF combines vectorization and compilation into a hybrid query processing model. Trades off additional instructions for reduced CPI.
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{16-vectorization2}
+
+
+
+\end{document}
