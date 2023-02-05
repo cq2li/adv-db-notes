@@ -1,4 +1,3 @@
-<<<<<<< HEAD:05-compression/Makefile
 # Makefile for LaTeX files
 
 LATEX	= pdflatex -shell-escape
@@ -73,16 +72,3 @@ spellcheck:
 # Define rules for PDF source files.
 %.pdf: %.eps
 	epstopdf $< > $(<:%.eps=%.pdf)
-=======
-TARGET := $(shell egrep -l '^[^%]*\\begin\{document\}' *.tex)
-all: pdf
-
-pdf:
-	GS_OPTIONS=-dPDFSETTINGS=/prepress rubber -e "bibtex.crossrefs 100" --pdf -Wrefs -Wmisc $(TARGET)
-
-clean:
-	rm -f *.aux *.log *.out *.bbl *.blg *~ *.bak $(TARGET).ps $(TARGET).pdf
-
-ps: pdf
-	GS_OPTIONS=-dPDFSETTINGS=/prepress pdftops -level1 $(TARGET).pdf
->>>>>>> 5975fbab11fe24cee1a7185211ff09c56c35d3da:09-compression/Makefile
