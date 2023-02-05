@@ -6,7 +6,7 @@
 % \newcommand{\CourseLecture}{}
 
 \newcommand{\PDFTitle}{\CourseName\texorpdfstring{\\}{ }(\CourseSemester) -
-\lecturenumber\texorpdfstring{\\}{ }\lecturename}
+\lectureNum\texorpdfstring{\\}{ }\lectureName}
 
 \newcommand{\marginTop}{1in}
 \newcommand{\marginBot}{1in}
@@ -117,8 +117,8 @@
 \renewcommand{\headrulewidth}{2.5pt}
 \renewcommand{\footrulewidth}{1pt}
 
-\lhead{\fancyplain{}{\CourseSemester $ $-- Lecture \#\lecturenumber}}
-\rhead{\fancyplain{}{\lecturename}}
+\lhead{\fancyplain{}{\CourseSemester $ $-- Lecture \#\lectureNum}}
+\rhead{\fancyplain{}{\lectureName}}
 \cfoot{\fancyplain{}{\href{\CourseURL}{\CourseName} \\ Page \thepage\ of \pageref{LastPage}}}
 
 
@@ -131,5 +131,5 @@
    { Carnegie Mellon University } \\
    { \href{\CourseProfURL}{Prof. \CourseProf} } \\
 }
-\title{\bf Lecture \#\lecturenumber: \lecturename\vspace*{-0.25in}}
+\title{\bf Lecture \#\lectureNum: \lectureName\vspace*{-0.25in}}
 \date{}
