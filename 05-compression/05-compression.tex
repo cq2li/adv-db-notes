@@ -1,8 +1,8 @@
 \documentclass[11pt]{article}
 
-\newcommand{\lectureNum}{10}
+\newcommand{\lectureNum}{5}
 \newcommand{\lectureName}{Database Compression}
-\newcommand{\lectureDate}{2018-02-21}
+\newcommand{\lectureDate}{2023-02-06}
 
 \usepackage{../dbnotes}
 
@@ -177,22 +177,14 @@ The encoded values also need to support sorting in the same order as original va
     \item \textbf{Shared-leaves B+Tree:} Use two B+Trees. The two B+Trees will go in opposite directions: one for encoding, the other for decoding. In the middle layer, they share the leaf nodes that allow encoding and decoding in both directions to minimize the amount of redundant data~\cite{p283-binnig}. This approach is slower than a hash table and takes more memory, but supports range and prefix queries.
 \end{itemize}
 
-%% ==================================================================
-%% OLTP Indexes
-%% ==================================================================
-\section{OLTP Indexes}
-An OLTP DBMS cannot use the OLAP compression techniques because it needs to support fast random tuple access. Compressing and decompressing “hot” tuples on-the-fly
-would be too slow to do during a transaction. 
-
-Most queries in OLTP applications access the database using indexes. Thus, OLTP applications build many indexes for their tables. These indexes consume a large portion of the memory for an OLTP database. However, none of the compression schemes mentioned earlier are designed for indexes.
-
-\subsection*{Hybrid Indexes}
-Hybrid Indexes~\cite{Zhang} introduces a technique to compress database indexes. It split a single logical index into two physical indexes. Data is migrated from one stage index to the next index over time. The two stages are:
+\section{Intermediate Results}
+After evaluating a predicate on compressed data,
+the DBMS will decompress it as it moves from the
+scan operator to the next operator. The DBMS (typically) does not recompress data during query execution. Otherwise, it may result in:
 \begin{itemize}
-    \item \textbf{Dynamic Stage:} Stores uncompressed new data. Data in this stage is fast to access and update.
-    \item \textbf{Static Stage:} Stores compressed old data. Data in this stage is read-only. Static stage uses a compact B+Tree structure that has empty slots removed and reduces pointers to offsets, storing leaf nodes in a giant array.
+    \item \textbf{Overheads:} The system needs to embed decompression logic throughout the entire execution engine and decompress and recompress before and after every operator.
+    \item \textbf{Implementation Complexity:} To execute a hash join on two tables which use different compression schemes, the compression related information, i.e. decoding dictionary, will need to be pushed up and joined along with the compressed value, which is logistically complicated.
 \end{itemize}
-All updates go to dynamic stage; reads pass through a bloom filter (a compact probabilistic data structure that might generate false positives) that directs the DBMS to either stage.
 
 % ==================================================================
 % BIBLIOGRAPHY
