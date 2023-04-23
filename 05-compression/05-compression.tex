@@ -15,9 +15,8 @@
 %% DATABASE COMPRESSION
 %% ==================================================================
 \section{Database Compression}
-Compression is widely used in disk-based DBMSs. Because disk I/O is (almost) always the main bottleneck. Thus, compression in these systems improve performance, especially in read-only analytical workloads. The DBMS can fetch more useful tuples if they have been compressed beforehand at the cost of greater computational overhead for compression and decompression.
+Compression is widely used in disk-based DBMSs. Because disk I/O is (almost) always the main bottleneck. Thus, compression in these systems improve performance, especially in read-only analytical workloads. The DBMS can fetch more useful tuples if they have been compressed beforehand at the cost of greater computational overhead for compression and decompression. The key trade-off here is between the computational overhead and compression ratio.
 
-In-memory DBMSs more complicated since they do not have to fetch data from disk to execute a query. Memory is much faster than disks, but compressing the database reduces DRAM requirements and processing. They have to strike a balance between \textbf{speed} vs. \textbf{compression ratio}, and most systems choose to favor speed.
 
 If data sets are completely random bits, there would be no ways to perform compression. However, there are key properties of real-world data sets that are amenable to compression:
 \begin{itemize}
@@ -33,13 +32,13 @@ Given this, we want a database compression scheme to have the following properti
 \begin{itemize}
     \item
     Must produce fixed-length values. The only exception is var-length data stored in separate pools. This because the DBMS should follow word-alignment and be able to access data using offsets.
-    
-    \item
-    Allow the DBMS to postpone decompression as long as possible during query execution (late materialization). Constantly compressing / decompressing large chunks of data is a waste of CPU resources.
-    
+
     \item
     Must be a \textbf{lossless} scheme because people do not like losing data. 
     Any kind of \textbf{lossy} compression has to be performed at the application level.
+    
+    \item
+    Allow the DBMS to postpone decompression as long as possible during query execution (late materialization). Constantly compressing / decompressing large chunks of data is a waste of CPU resources.
 \end{itemize}
 
 %% ----------------------------------------------------
@@ -76,9 +75,7 @@ Before adding compression to the DBMS, we need to decide what kind of data we wa
 %% ==================================================================
 \section{Naive Compression}
 The DBMS compresses data using a general purpose algorithm (e.g., gzip, LZO, LZ4, Snappy,
-Brotli, Oracle OZIP, Zstd). Although there are several compression algorithms that the DBMS could
-use, engineers often choose ones that often provides higher speed rather than compression ratio for
-in-memory DBMSs. The scope of compression is only based on the data provided as input.
+Brotli, Oracle OZIP, Zstd). The scope of compression is only based on the data provided as input. Zstd is considered as the state-of-art method of this domain with respect to compression and performance trade-off.
 
 An example of using naive compression is in \textbf{MySQL InnoDB}. The DBMS compresses disk
 pages, pad them to a power of two KBs and stored them into the buffer pool. However, every time the
@@ -176,10 +173,16 @@ deltas are typically small. This compression scheme works bad for OLTP since the
 from the beginning to reconstruct the original string.
 
 %% ----------------------------------------------------
+%% Bit Packing
+%% ----------------------------------------------------
+\subsection*{Bit Packing}
+If the values for an integer attribute is smaller than the range of its given data type size, then reduce the number of bits to represent each value. Bit-shifting tricks that operate on multiple values in a single word like in BitWeaving/Vertical can be used.
+
+%% ----------------------------------------------------
 %% Mostly Encoding
 %% ----------------------------------------------------
 \subsection*{Mostly Encoding}
-When the values for an attribute are ``mostly'' less than the largest size, the DBMS can store
+A variation of bit packing for when the values for an attribute are ``mostly'' less than the largest size, the DBMS can store
 them as a smaller data type. The remaining values that cannot be compressed are stored in their raw
 form in a separate space. This approach is used in \dbSys{Amazon Redshift}.
 
