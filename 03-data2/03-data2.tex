@@ -1,0 +1,237 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lectureNum}{09}
+\newcommand{\lectureName}{Storage Models and Data Layout}
+\newcommand{\lectureDate}{2019-02-19}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% INTRODUCTION
+%% ==================================================================
+\section{Introduction}
+One can think of an in-memory database as a large array of bytes. The system imposes structure on top of this byte array according to the database schema defined in the catalogs. The database schema tells the DBMS how to convert the bytes into the appropriate type that builds up a data tuple. Each tuple in the DBMS prefixed with a header that contains its meta-data (e.g., begin / end timestamp for MVCC). This lecture discusses how data tuples/metadata are represented and stored in the DBMS.
+
+%% ==================================================================
+%% DATA TYPE REPRESENTATION
+%% ==================================================================
+\section{Data Type Representation}
+Data type representation determines how a DBMS stores the actual bits for a value in-memory. According to the SQL standard, the basic types in the DBMS are:
+\begin{itemize}
+    \item \sql{INTEGER/BIGINT/SMALLINT/TINYINT}: C/C++ representation (defined by hardware).
+    \item \sql{FLOAT/REAL}: IEEE-754 standard (defined by hardware)
+    \item \sql{NUMERICAL/DECIMAL}: Fixed-point decimals (defined in DBMS)
+    \item \sql{TIME/DATE/TIMESTAMP}: 32/64 bit of (micro/milli)seconds since Unix epoch.
+    \item \sql{VARCHAR/VARBINARY/TEXT/BLOB}: Pointer to other location if type is $\geq$ 64-bits, otherwise inline with tuple. At the pointer destination, there will be a header with length and address to next location (if segmented), followed by data bytes.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Variable Precision Numbers
+%% ----------------------------------------------------
+\subsection*{Variable Precision Numbers}
+Variable Precision Numbers are inexact numeric data types that use the ``native'' C/C++ types specified by IEEE-754 standard. They are faster than arbitrary precision numbers because the CPU can execute instructions (arithmetic) on them directly with DBMS-specific rounding / overflow rules. However, variable-precision numbers usually have rounding errors that make them bad for storing information that requires exact precision (e.g., money).
+
+Example: \sql{FLOAT}, \sql{REAL}
+% \end{itemize}
+
+%% ----------------------------------------------------
+%% Fixed Point Precision Numbers
+%% ----------------------------------------------------
+\subsection*{Fixed Point Precision Numbers}
+When rounding errors are unacceptable, we have to resort to another type of number representation. Fixed Point Precision Numbers are numeric data types with arbitrary precision and scale. They are typically stored in exact, variable-length binary representation with additional meta-data (e.g., variances, signs), similar to how \sql{VARCHAR}s are stored. However, these metadata introduces extra overhead because the DBMS needs to make sure that executing instructions on fixed point numbers still preserves their properties.
+    
+Example: \sql{NUMERIC}, \sql{DECIMAL}
+% \end{itemize}
+
+%% ----------------------------------------------------
+%% Null Data Types
+%% ----------------------------------------------------
+\subsection*{Null Data Types}
+There are three approaches to storing null data types:
+\begin{itemize}
+    \item \textbf{Special Values:} Designate a special value to represent \sql{NULL} for a particular data type (e.g., \sql{INT32\_MIN}). This approach saves extra space that would be used to indicate whether a data is empty, but it requires extra code to protect users from storing that special value inside the database.
+    \item \textbf{Null Column Bitmap Header:} A more common approach is to store a bitmap in the tuple header that specifies what attributes are null. The offset in the bitmap corresponds to an attribute for that tuple. This speeds up scans since the DBMS can just check the header to see whether an attribute is empty before reading the actual values.
+    \item \textbf{Per Attribute Null Flag:} Store a separate flag inline with each attribute that marks that its value is null. A downside of this flag is that the DBMS has to use more space than just a single bit because this messes up with \textit{word alignment}.
+\end{itemize}
+
+%% ==================================================================
+%% DATA LAYOUT
+%% ==================================================================
+\section{Data Layout}
+In addition to deciding how individual bytes for the data tuples' attributes will be stored, the DBMS needs to decide how to organize the data tuples in its giant byte array. A data tuple is just a byte array. The attributes defined in the schema specifies how much space they are going to occupy in that byte array.
+
+%% ----------------------------------------------------
+%% Fixed-Length Fields
+%% ----------------------------------------------------
+\subsection*{Fixed-Length Fields}
+ First we focus on the attributes of a data tuple. Attributes may consist of a header, id and value, which are all fixed-length fields. After the DBMS accesses the index and retrieves the block id and offset, it lands at a location where the block header is and can access the attributes of a tuple by inferring from the offset and data tuple size.
+
+Example: \texttt{reinterpret\_cast<int32\_t*>(address)}. This tells the compiler that the DBMS wants to treat the address as a signed 32-bit integer pointer.
+
+%% ----------------------------------------------------
+%% Variable-Length Fields
+%% ----------------------------------------------------
+\subsection*{Variable-Length Fields}
+For a variable-length field, the DBMS will access it the same way as it would do for a fixed-length field, except that the value in the fixed-length data pool for that attribute is a pointer to a location in the variable-length data blocks. To extract a \sql{VARCHAR}, for instance, the DBMS computes its location based on offset and tuple size, de-reference the pointer, and find its content in the data blocks. 
+
+The content in the data blocks could either be a single chunk or multiple chunks. If the var-length value is split into multiple chunks, then for each chunk there is a pointer in the header that points to the location of the following chunk.
+
+The variable-length field can be extended to include a prefix of the actual data inside the variable-length pointer. This speeds up DBMS scans as it helps avoid following multiple pointers through chunks in the data blocks. This technique is mainly used for in-memory databases because only in in-memory databases, variable-length data is stored separately from the data tuples.
+
+%% ----------------------------------------------------
+%% Word Alignment Tuples, not sure where to put this
+%% ----------------------------------------------------
+\subsection*{Word Alignment Tuples}
+All attributes in a tuple must be word aligned (e.g., 64-byte aligned) to enable the CPU to access it without any unexpected behavior or additional work. If the DBMS accesses an attribute that spans several word boundaries, the hardware provides three possible outcomes:
+\begin{itemize}
+    \item \textbf{Perform Extra Reads:} Execute two reads to load the appropriate parts of the data word and reassemble them (e.g., x86, new ARM versions). This guarantees correct reads, but takes much longer time than a read for a word aligned tuple due to extra instructions.
+    \item \textbf{Random Reads:} Read some unexpected combination of bytes assembled into a 64-bit word.
+    \item \textbf{Reject:} Throw an exception (e.g., old ARM versions).
+\end{itemize}
+
+Therefore, to avoid having the CPU perform excessive work, the DBMS uses \textit{padding} to ensure that a tuple is word aligned. Another approach is to \textit{reorder} the physical layout of the tuple's attributes to make sure they are aligned. The DBMS may still need to pad subsequent tuples to ensure that they are also word aligned.
+
+%% ==================================================================
+%% STORAGE MODELS
+%% ==================================================================
+\section{Storage Models}
+A DBMS's storage model specifies how it represents multiple tuples. The DBMS can store them in a \textit{row-oriented} format, \textit{column-oriented} format, or a \textit{hybrid} format~\cite{Abadi}.
+
+%% ----------------------------------------------------
+%% N-Ary Storage Model
+%% ----------------------------------------------------
+\subsection*{N-Ary Storage Model (NSM)}
+NSM is a row-oriented storage model that stores all of the attributes for a single tuple contiguously (row store). This approach is ideal for OLTP workloads where transactions tend to operate only an individual entity and insert heavy workloads. There are two different ways to organize a NSM database:
+\begin{itemize}
+    \item \textbf{Heap Organized Tables:}
+    Tuples are stored in blocks called a heap (large fixed-length data block) that does not necessarily define an order.
+    
+    \item \textbf{Index-Organized Tables:}
+    Tuples are stored in the primary key index (e.g., B+Tree) itself.
+\end{itemize}
+
+\textbf{Advantages:}
+\begin{itemize}
+    \item
+    Fast inserts, updates, and deletes. An access to a single location returns all the information of a single tuple.
+    \item 
+    Can use an index-organized physical storage like B+Tree by storing tuples in the leaf nodes.
+
+\end{itemize}
+
+\textbf{Disadvantages:}
+\begin{itemize}
+    \item
+    Not good for OLAP workloads that scans large portions of the table and/or a subset of the attributes. This is because it pollutes the CPU cache by fetching data that is not needed for processing
+    the query.
+\end{itemize}
+    
+%% ----------------------------------------------------
+%% Decomposition Storage Model
+%% ----------------------------------------------------
+\subsection*{Decomposition Storage Model (DSM)}
+DSM stores a single attribute for all tuples contiguously in a block of data (column store). This model is ideal for OLAP workloads where read-only queries perform large scans over a subset of the table's attributes. The DBMS is also able to use the vector-at-a-time query processing model.
+
+In NSM, tuples are stored contiguously so the DBMS can access the tuple directly using offset and tuple size. Since DSM stores attributes of a tuple in different regions of memory, the DBMS needs to figure out how to reconstruct tuples. There are two approaches for identifying a tuple:
+\begin{itemize}
+    \item \textbf{Fixed-length Offsets:} Each value is the same length for an attribute. The DBMS can reach locations of other attributes of the same tuple by inferring from the length of the value and the current offset.
+    \item \textbf{Embedded Tuple Ids:} Each value is stored with its tuple id in a column.
+\end{itemize}
+
+\textbf{Advantages:}
+\begin{itemize}
+    \item
+    Reduces the amount of wasted work during query execution because the DBMS only reads the data that it needs for that query.
+    
+    \item
+    Enables better compression because all the values for the same attribute are stored contiguously in a single column.
+\end{itemize}
+
+\textbf{Disadvantages:}
+\begin{itemize}
+    \item
+    Slow for point queries, inserts, updates, and deletes because of tuple splitting/stitching. Stitches require separate memory access for each attribute of a tuple; inserts require splitting the tuple and storing them in separate columns.
+\end{itemize}
+
+%% ==================================================================
+%% HYBRID STORAGE MODELS
+%% ==================================================================
+\section{Hybrid Storage Models}
+NSM is better for OLTP and DSM is better for OLAP. But for applications that have aspects of both kinds of workloads, it may be better to use both storage models. To do this, we can exploit the access patterns of how applications typically intersect with tuples. Data is ``hot'' when first entered into the database, as it is more likely to updated again near the future. As a tuple ages, it is updated less frequently. Thus, the DBMS can store new data in NSM for fast OLTP operations. It can then migrate aged data to DSM for more efficient OLAP operations. We introduce two approaches for combining NSM and DSM into a hybrid model.
+
+%% ----------------------------------------------------
+%% Separate Execution Engine
+%% ----------------------------------------------------
+\subsection*{Separate Execution Engine}
+Run separate ``internal'' execution engines that each only operate on DSM or NSM data.
+When a query arrives, the DBMS decides whether to run it on the DSM engine or the NSM engine. The system combines query results from both engines to appear as a single logical database to the application.
+
+Whenever there is a query that spans both engines, the DBMS needs a mechanism (e.g., two-phase commit) for synchronization to ensure there are no incorrect or inconsistent results. There are two synchronization methods:
+\begin{itemize}
+    \item \textbf{Fractured Mirrors:}~\cite{p430-ramamurthy} Store a second copy of the database in a DSM layout that is automatically updated. All updates are first entered in the NSM primary then eventually copied into the DSM mirror through a background thread. This is used by \dbSys{Oracle In-Memory Column Store} (ephemeral mirror) and \dbSys{IBM DB2 BLU}.
+    \item \textbf{Delta Store:} Instead of having an exact copy of all the data, use DSM to store cold data. Updates are staged to the NSM and a background thread migrates updates from the delta store and applies them to DSM data. As a result, NSM always holds the newest version, while DSM holds older versions. This is used by \dbSys{SAP HANA}, \dbSys{MemSQL}, and \dbSys{Vertica}.
+\end{itemize}
+
+To find out when to store/migrate data into DSM, the DBMS needs a way to know whether data becomes cold. There are three approaches for categorizing data:
+\begin{itemize}
+    \item \textbf{Manual:} DBA specifies what tables should be stored as DSM.
+    \item \textbf{Off-line:} DBMS monitors access logs offline and then makes decision about what data to move to DSM.
+    \item \textbf{On-line:} DBMS tracks access patterns at runtime and then makes decision about what data to move to DSM.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Single Execution Engine
+%% ----------------------------------------------------
+\subsection*{Single Execution Engine}
+The DBMS uses single execution engine that is able to operate on both NSM and DSM 
+data~\cite{p583-arulraj}. This saves the need for storing two copies of the database or performing synchronization across multiple database segments. Note that a DBMS can still use a delta-store approach with this single-engine architecture.
+
+An example is \dbSys{Peloton Adaptive Storage}. It introduces a mechanism that would automatically recognize different queries and breakdown original data into hot/cold data.
+
+\textbf{Tile Architecture:} Peloton uses an indirection layer that abstracts the true layout of tuples from query operators. The DBMS uses different tile groups within a single table to store in either a row-oriented or column-oriented manner. During an execution lookup, an extra header (tile group header) specifies the layout for every single column that the DBMS is accessing. When the DBMS executes queries, it generates a result set that contains pointers into offsets within those columns. The DBMS then passes this result set as a vector of offsets into different parts of the engine and retrieves the data according to offsets and tile layouts.
+
+%% ==================================================================
+%% System Catalog
+%% ==================================================================
+\section{System Catalog} 
+System catalog stores metadata about the database. Almost every DBMS stores the catalog in its own table. If the DMBS wants to access the catalog table internally, this process can be expensive as it requires additional memory lookup using SQL queries. 
+
+Therefore, the DBMS needs another abstraction layer above the catalog that allows the DBMS to directly manipulate the catalog instead of using SQL queries; that layer is similar to an object-oriented interface to the catalog tuples themselves. 
+
+Bootstraping the catalog is also tricky. The DBMS needs a mechanism that does not rely on SQL to initialize the database because there is no way to use SQL before the catalog has been populated. Therefore, the DBMS needs specialized code for ``bootstrapping" catalog tables. 
+
+If the entire catalog is stored as tables that are manipulated using transactions, the catalog becomes transactional with ACID guarantees. Under \isoLevel{SNAPSHOT ISOLATION}, if we make changes to the database (e.g., adding extra column),  the DBMS does not need extra mechanism to protect readers.
+
+\subsection*{Schema Changes}
+Schema changes (e.g., adding columns) are different for NSM and DSM.
+\begin{itemize}
+    \item \sql{ADD COLUMN}: In NSM, scan through every tuple, copy tuples with the new column into new region in memory and invalidate old tuples; in DSM, just create the new column segment.
+    \item \sql{DROP COLUMN}: In NSM, either copy tuples into new region of memory similar to \sql{ADD} or mark column as "deprecated" and clean up later using garbage collection; in DSM, just drop the column and free memory.
+    \item \sql{CHANGE COLUMN}: Check whether the conversion is allowed to happen, which depends on default values.
+\end{itemize}
+
+\subsection*{Indexes}
+Even with transactional guarantees, creating/deleting indexes can be tricky in a non-blocking manner. 
+\begin{itemize}
+    \item \sql{CREATE INDEX}: Scan the entire table and populate the index. The DBMS has to record changes made by transactions that modified the table while another transaction was building the index. When the scan completes, lock the table and resolve changes that were missed after the scan started.
+    \item \sql{DROP INDEX}: Just drop the index logically from the catalog. It only becomes ``invisible" when the transaction that dropped it commits. All existing transactions will still have to update it.
+\end{itemize}
+
+\subsection*{Sequences}
+Sequences (auto-increment/serial keys) are used for maintaining a global counter. They are typically stored in the catalog. 
+
+However, sequences are not maintained with the same isolation protection as regular catalog entries. This is because sequences are always increasing; rolling back a transaction that incremented a sequence does not rollback the changes to that sequence. All \sql{INSERT} queries would incur write-write conflicts.
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{03-storage}
+
+\end{document}
