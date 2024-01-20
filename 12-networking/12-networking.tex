@@ -1,0 +1,219 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lectureNum}{12}
+\newcommand{\lectureName}{Networking Protocols}
+\newcommand{\lectureDate}{FIXME}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% DATABASE ACCESS
+%% ==================================================================
+\section{Database Access}
+In class, all the demos are featured through a terminal client. SQL queries are written by hand and 
+results are printed to the terminal. In practice, real programs access the database through an API. 
+There are three broad categories of database access APIs: \textit{Direct Access (DBMS-specific)}, 
+\textit{Open Database Connectivity (ODBC)}, and \textit{Java Database Connectivity (JDBC)}.
+
+%% ----------------------------------------------------
+%% Open Database Connectivity
+%% ----------------------------------------------------
+\subsection*{Open Database Connectivity (ODBC)}
+ODBC was originally developed in the early 1990s by Microsoft and Simba Technology. It is now the 
+standard API for accessing a DBMS and is designed to be independent of the DBMS and OS. ODBC is 
+mostly used for C/C++ development. Every major relational DBMS now has an ODBC implementation.
+
+ODBC is based on the device driver model. The \textit{driver} encapsulates the logic needed to 
+convert a standard set of commands into the DBMS-specific calls. The ODBC driver then uses a wire 
+protocol (DBMS-specific) to communicate with the database.
+
+ODBC can also emulate features that are required by the standard API, but not provided by the DBMS 
+itself. For instance, the DBMS may not support cursors. However, ODBC provides a cursor API that 
+requires implementation on the driver's side. Users can then use ODBC's cursor API as if the DBMS 
+supports cursors.
+
+%% ----------------------------------------------------
+%% Java Database Connectivity
+%% ----------------------------------------------------
+\subsection*{Java Database Connectivity (JDBC)}
+JDBC can be considered a version of ODBC for the programming language Java instead of C/C++. It is 
+developed by Sun Microsystems in 1997 to provide a standard API for connecting a Java program with a 
+DBMS. Similar to ODBC, it exposes a standard set of APIs and use drivers to communicate with the 
+DBMS. 
+
+There are four different ways to implement JDBC:
+\begin{itemize}
+    \item \textbf{JDBC-ODBC Bridge}:
+    Convert JDBC method calls into ODBC function calls. This approach provides no actual means of 
+    communicating with the DBMS using Java.
+    
+    \item \textbf{Native-API Driver}:
+    Convert JDBC method calls into native calls of the target 
+    DBMS API.
+    
+    \item \textbf{Network-Protocol Driver}:
+    Driver connects to a middleware that converts JDBC calls into a vendor-specific DBMS protocol. 
+    The middleware then communicates with the DBMS. The driver is not connected directly to the 
+    DBMS.
+    
+    \item \textbf{Database Protocol Driver}:
+    Pure Java implementation that converts JDBC calls directly into a vendor-specific DBMS protocol. 
+    This is the most common implementation.
+\end{itemize}
+
+%% ==================================================================
+%% DATABASE NETWORKING PROTOCOLS
+%% ==================================================================
+\section{Database Networking Protocols}
+All major DBMSs implement their own proprietary wire protocol over TCP/IP. ODBC/JDBC masks the 
+complexity of each individuals DBMSs wire protocol.
+
+%% ----------------------------------------------------
+%% Client/Server Interaction
+%% ----------------------------------------------------
+\subsection*{Client/Server Interaction}
+The client connects to DBMS and begins authentication process, which may involve an SSL handshake. 
+Then, the client sends a query to the DBMS. The DBMS executes the query, then serializes the results 
+and sends it back to the client. The serialization is usually considered the bottleneck causing 
+performance issues.
+
+%% ----------------------------------------------------
+%% Existing Protocols
+%% ----------------------------------------------------
+\subsection*{Existing Protocols}
+Most newer systems implement one of the open-source DBMS wire protocols. The two most common are 
+\dbSys{Postgres} and \dbSys{MySQL}. This allows a new DBMS to reuse the client existing drivers for 
+these other systems without having to develop and support them. However, just because one DBMS 
+``speaks'' another DBMS's wire protocol does not mean that it is compatible. The packets transferred 
+through the wire are still DBMS-specific. The DBMSs need to support catalogs, SQL dialect, and 
+other functionality that can process the packets correctly.
+
+%% ==================================================================
+%% PROTOCOL DESIGN SPACE
+%% ==================================================================
+\section{Protocol Design Space}
+Protocol designs involve API layouts and data compression/serialization 
+schemes~\cite{Raasveldt2017}.
+
+%% ----------------------------------------------------
+%% Row vs. Column Layout
+%% ----------------------------------------------------
+\subsection*{Row vs. Column Layout}
+ODBC and JDBC are inherently row-oriented APIs. The DBMS packages tuples into messages one tuple 
+at a time. Therefore, the client has to deserialize data one tuple at a time. 
+
+However, modern data analysis software (e.g., Tensorflow, \dbSys{Spark}) operates on matrices and 
+columns. Serializing/Deserializing one tuple at a time makes it inefficient for OLAP queries. To 
+improve performance, one potential solution is to send data in vectors. The DBMS should send back 
+batch of rows in a column-oriented fashion.
+
+%% ----------------------------------------------------
+%% Compression
+%% ----------------------------------------------------
+\subsection*{Compression}
+If the database server has adopted a compression scheme, the driver client should use a 
+corresponding compression scheme as well to communicate with the server. The DBMS and client can use 
+either \textit{Naive Compression} or \textit{Columnar-Specific Encoding}.
+
+From a software engineering perspective, one can argue that Naive Compression performs better 
+than Columnar-Specific Encoding for network communication. This is because naive 
+compression is agnostic to the shape of data. For instance, the server can just serialize the data, 
+compress it using gzip, and send it to the client; the client then retrieves the data using gzip as 
+well. This requires no implementation on the client side as it uses an available library. If the 
+server uses Columnar-Specific Encoding, it has to figure out what the best compression scheme on the 
+fly. Additionally, the client has to implement a corresponding scheme as well. 
+
+When the network is slow, the DBMS should favor more heavyweight compression schemes to reduce the 
+amount of data transferred on the wire. This is an obvious trade-off between CPU usage and 
+bandwidth.
+
+%% ----------------------------------------------------
+%% Data Serialization
+%% ----------------------------------------------------
+\subsection*{Data Serialization}
+Data are serialized into packets to be transferred on the wire. There are two ways to serialize the data:
+
+\begin{itemize}
+    \item \textbf{Binary Encoding}:
+    Represent data in its binary form. The DBMS can implement its own 
+    binary encoding format or rely on existing libraries (e.g., ProtoBuf, Thrift). The closer the 
+    serialized format is to the DBMS's binary format, the lower the overhead to serialize. Since 
+    endianness can differ between the DBMS and the client, the client has to handle endian 
+    conversion as well. 
+    
+    \item \textbf{Text Encoding}:
+    Convert all binary values into strings. Since everything is a 
+    string, the client does not have to worry about endianness. The downside of the method is more 
+    data storage.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% String Handling
+%% ----------------------------------------------------
+\subsection*{String Handling}
+There are three approaches to handling strings for the DBMS and driver:
+
+\begin{itemize}
+    \item \textbf{Null Termination}:
+    Store a null byte ('\textbackslash 0') to denote the end of a 
+    string. Client has to scan entire string to find the end of the string.
+    
+    \item \textbf{Length Prefixes}:
+    Add the length of the string at the beginning of the bytes.
+    
+    \item \textbf{Fixed Width}:
+    Pad every string to be the max size of the attribute.
+\end{itemize}
+
+There is no particular string handling approach that stands out above the others; all three 
+approaches perform differently in different settings.
+
+%% ==================================================================
+%% KERNEL BYPASS METHODS
+%% ==================================================================
+\section{Kernel Bypass Methods}
+The DBMS's network protocol implementation is not the only source of slowdown; a lot of network 
+operations rely on the OS. 
+
+The OS's TCP/IP stack is slow due to a number of reasons. To transfer messages, the OS has to 
+perform expensive context switches and interrupts. Moreover, in order to send a message, the OS 
+copies the packet to prevent it being deallocated before the packet reaches the networking hardware 
+layer. The OS also maintains its own latches for its own data structures, which can become potential 
+bottlenecks as well for the DBMS/driver.
+
+Therefore, some DBMS try to avoid the OS. We use kernel bypass methods to allows the 
+system to get data directly from the Network Interface Controller (NIC) into the DBMS address space. 
+This saves the need for data copying or OS TCP/IP stack since the DBMS will be talking directly to 
+the hardware layer. There are two kernel bypass methods:
+
+%% ----------------------------------------------------
+%% Data Plan Development Kit
+%% ----------------------------------------------------
+\subsection*{Data Plane Development Kit (DPDK)}
+DPDK is a set of libraries that allows programs to access NIC directly. It treats the NIC as a 
+bare metal device. This approach requires the DBMS code to do more to manage memory and buffers. An 
+example of a DBMS that uses this is \dbSys{ScyllaDB}.
+
+%% ----------------------------------------------------
+%% Remote Direct Memory Access
+%% ----------------------------------------------------
+\subsection*{Remote Direct Memory Access (RDMA)}
+RDMA libraries allow reading and writing memory directly on a remote host without going through 
+the OS. The client needs to know the correct address of the data that it wants to access; the server 
+is unaware that memory is being accessed remotely. \dbSys{Oracle RAC} and \dbSys{Microsoft FaRM} are 
+DBMSs that use RDMA.
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{12-networking}
+
+\end{document}
+

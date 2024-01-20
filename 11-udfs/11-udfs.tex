@@ -1,0 +1,108 @@
+\documentclass[11pt]{article}
+
+\newcommand{\lectureNum}{11}
+\newcommand{\lectureName}{Server-side Logic Execution}
+\newcommand{\lectureDate}{FIXME}
+
+\usepackage{../dbnotes}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+
+%% ==================================================================
+%% Embedded Database Logic
+%% ==================================================================
+\section{Embedded Database Logic}
+Move application logic into the DBMS to avoid multiple network round-trips and to extend the functionality of the DBMS. Potential Benefits: Efficiency \& Reuse.
+There are several different types of Embedded Database Logic inculding User-Defined Functions (UDFs), Stored Procedures, Triggers, User-Defined Types (UDTs), and User-Defined Aggregates (UDAs).
+
+%% ==================================================================
+%% User-Defined Functions
+%% ==================================================================
+\section{User-Defined Functions}
+A user-defined function (UDF) is a function written by the application developer that extends the system's functionality beyond its built-in operations. It takes in input arguments (scalars), performs some computation, and then returns a result (scalars, tables)
+
+%% ----------------------------------------------------
+%% UDF Advantages
+%% ----------------------------------------------------
+\subsection*{UDF Advantages}
+\begin{itemize}
+	\item UDFs encourage modularity and code reuse: different queries can reuse the same application logic without having to reimplement it each time.
+	
+	\item Fewer network round-trips between application server and DBMS for complex operations.
+	
+	\item Some types of application logic are easier to express and read as UDFs than SQL.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% UDF Disadvantages
+%% ----------------------------------------------------
+\subsection*{UDF Disadvantages}
+\begin{itemize}
+	\item Query optimizers treat UDFs as black boxes. 
+	Unable to estimate cost if you don't know what a UDF is going to do when you run it.
+	
+	\item It is difficult to parallelize UDFs due to correlated queries inside of them.
+	Some DBMSs will only execute queries with a single thread if they contain a UDF.
+	Some UDFs incrementally construct queries.
+	
+	\item Complex UDFs in SELECT / WHERE clauses force the DBMS to execute iteratively.
+	RBAR = "Row By Agonizing Row"
+	Things get even worse if UDF invokes queries due to implicit joins that the optimizer cannot "see".
+	
+	\item Since the DBMS executes the commands in the UDF one-by-one, it is unable to perform crossstatement optimizations.
+\end{itemize}
+
+%% ==================================================================
+%% Froid
+%% ==================================================================
+\section{Froid}
+Automatically convert UDFs into relational expressions that are inlined as sub-queries~\cite{Ramachandra2017}. Does not require the app developer to change UDF code. Perform conversion during the rewrite phase to avoid having to change the cost-base optimizer. Commercial DBMSs already have powerful transformation rules for executing sub-queries efficiently.
+Froid has five main steps:
+\begin{itemize}
+	\item Transform Statements
+	\item Break UDF into Regions
+	\item Merge Expressions
+	\item Inline UDF Expression into Query
+	\item Run Through Query Optimizer
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Sub-Queries
+%% ----------------------------------------------------
+\subsection*{Sub-Queries}
+The DBMS treats nested sub-queries in the where clause as functions that take parameters and return a single value or set of values. The two approaches are:
+\begin{itemize}
+	\item Rewrite to de-correlate and/or flatten them
+	\item Decompose nested query and store result to temporary table. Then the outer joins with the temporary table.
+\end{itemize}
+
+%% ----------------------------------------------------
+%% Lateral Join
+%% ----------------------------------------------------
+\subsection*{Lateral Join}
+A lateral inner subquery can refer to fields in rows of the table reference to determine which rows to return. Allows you to have sub-queries in FROM clause. The DBMS iterates through each row in the table referenced and evaluates the inner sub-query for each row. The rows returned by the inner sub-query are added to the result of the join with the outer query. 
+
+%% ==================================================================
+%% UDF CTE Conversion
+%% ==================================================================
+\section{UDF CTE Conversion}
+Rewrite UDFs into plain SQL commands~\cite{Duta2019}. Use recursive common table expressions (CTEs) to support iterations and other control flow concepts not supported in Froid. DBMS Agnostic can be implemented as a rewrite middleware layer on top of any DBMS that supports CTEs. The five main steps to conver UDFs to CTEs are:
+\begin{itemize}
+	\item Static Single Assignment Form
+	\item Administrative Normal Form
+	\item Mutual to Direct Recursion
+	\item Tail Recursion to WITH RECURSIVE
+	\item Run Through Query Optimizer
+\end{itemize}
+
+% ==================================================================
+% BIBLIOGRAPHY
+% ==================================================================
+\newpage
+\bibliographystyle{abbrvnat}
+\bibliography{11-udfs}
+
+\end{document}
