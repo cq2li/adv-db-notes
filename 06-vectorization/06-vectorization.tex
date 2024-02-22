@@ -2,8 +2,8 @@
 
 \newcommand{\lectureNum}{06}
 \newcommand{\lectureName}{Vectorized Query Execution}
-\newcommand{\lectureDate}{FIXME}
-
+\newcommand{\lectureDate}{2024-02-12}
+\usepackage{hyperref}
 \usepackage{../dbnotes}
 
 \begin{document}
@@ -12,177 +12,198 @@
 \thispagestyle{plain}
 
 %% ==================================================================
-%% BACKGROUND
+%% Introduction
+%% ==================================================================
+\section{Introduction}
+\textbf{Vectorization} is the process of converting an algorithm's scalar implementation that processes a single pair of operands at a time to a vector implementation that performs the same operation on multiple pairs of operands at once. It is often also called \textbf{Data Parallelization}. 
+
+To take an extreme case, we can parallelize our algorithm over 32 cores, each with a 4-wide \hyperref[simd]{SIMD} register. Then, we are looking at a theoretical speedup of 128x. Although such a drastic speedup is not feasible in real-world scenarios, vectorization is still essential for most OLAP systems.
+The reasons will be talked about more in the following sections as follows:
+\begin{enumerate}
+  \setcounter{enumi}{1}
+    \item \hyperref[back]{Background}
+    \item \hyperref[impl]{Implementation Approaches}
+    \item \hyperref[fund]{Vectorization Fundamentals}
+    \item \hyperref[algo]{Vectorized DBMS Algorithms}
+\end{enumerate}
+
+
+%% ==================================================================
+%% Background
 %% ==================================================================
 \section{Background}
-Vectorization is the process of converting an algorithm's scalar implementation that processes a single pair of operands at a time, to a vector implementation that processes one operation on multiple pairs of operands at once.
 
-Example:
+This section will cover the basics of how SIMD works, the operations supported by current architectures, and the techniques to utilize them in DBMS.
 
-Say we can parallelize our algorithm over 32 cores. Each core has a 4-wide SIMD registers. Potential Speed-up: 32x ×4x = 128x
-
-Vectorization is essential for OLAP queries.These algorithms don’t work when the data exceeds your CPU cache.We can combine all the intra-query parallelism optimizations we’ve talked about in a DBMS.→Multiple threads processing the same query.→Each thread can execute a compiled plan.→The compiled plan can invoke vectorizedoperations.
-
-
-%% ==================================================================
-%% Hardware
-%% ==================================================================
-\section{Hardware}
-%% ----------------------------------------------------
-%% Modern CPUs
-%% ----------------------------------------------------
-\subsection*{Modern CPUs}
-\begin{itemize}
-	\item 
-	Multi-Core CPUs
-	Use a small number of high-powered cores. High power consumption and area per core.
-	
-	Massively superscalar and aggressive out-of-order execution
-	Instructions are issued from a sequential stream.
-	Check for dependencies between instructions.
-	Process multiple instructions per clock cycle.
-	
-	\item 
-	Many Integrated Cores (MIC)
-	Use a larger number of low-powered cores. Low power consumption and area per core. Expanded SIMD instructions with larger register sizes.
-	
-	\begin{itemize}
-		\item 
-		Knights Ferry (Columbia Paper)
-		Non-superscalar and in-order execution
-		
-		\item 
-		Knights Landing (Since 2016)
-		Superscalar and out-of-order execution.
-	\end{itemize}
-\end{itemize}
-
+\label{back}
 %% ----------------------------------------------------
 %% SIMD
 %% ----------------------------------------------------
-\subsection*{SIMD}
-SIMD (Single Instruction, Multiple Data) is A class of CPU instructions that allow the processor to perform the same operation on multiple data points simultaneously. All major ISAs have microarchitecture support SIMD operations.
+\subsection{SIMD}
+ \label{simd}
+SIMD (Single Instruction, Multiple Data) is A class of CPU instructions that allow the processor to perform the same operation on multiple data points simultaneously. All major ISAs have micro-architecture support for SIMD operations. The fundamental idea of SIMD vector processing is to keep the data in the SIMD registers for as long as possible, perform efficient operations on them, and only flush them out when necessary.
 
-SSE (Streaming SIMD Extensions) is a collection SIMD instructions that target special 128-bit SIMD registers.These registers can be packed with four 32-bit scalars after which an operation can be performed on each of the four elements simultaneously.First introduced by Intel in 1999.
-
-There are several common SIMD Instructions:
+The following are several common SIMD Instructions. For more details on the differences between different architectures refer \href{https://www.youtube.com/watch?v=_OJmxi4-twY&ab_channel=ArgonneMeetings%2CWebinars%2CandLectures}{ presentation by James Reinders}:
 \begin{itemize}
 	\item 
 	\textbf{Data Movement}: 
-	Moving data in and out of vector registers
+	Moving data in and out of SIMD registers, to memory, other registers, and possibly even bypassing the cache.
 	
 	\item 
-	\textbf{Arithmetic Operations}: 
-	Apply operation on multiple data items (e.g., 2 doubles, 4 floats, 16 bytes).
-	Example: ADD, SUB, MUL, DIV, SQRT, MAX, MIN
-	
-	\item 
-	\textbf{Logical Instructions}:
-	Logical operations on multiple data items.
-	Example: AND, OR, XOR, ANDN, ANDPS, ANDNPS
-	
-	\item 
-	\textbf{Comparison Instructions}:
-	Comparing multiple data items ($==,<,<=,>,>=,!=$)
-	
-	\item 
-	\textbf{Shuffle instructions}:
-	Move data in between SIMD registers
-	
-	\item 
-	\textbf{Miscellaneous}:
-	\textbf{Conversion}: Transform data between x86 and SIMD registers.
-	\textbf{Cache Control}: Move data directly from SIMD registers to memory (bypassing CPU cache).
+	\textbf{Basic Operations}: Arithmetic, Logical and Comparison operations
 \end{itemize}
 
+We will talk more about AVX-512 and the new instructions it introduced in the following sections.
 
-%% ==================================================================
-%% Vectorization Algorithms
-%% ==================================================================
-\section{Vectorization Algorithms}
 
 %% ----------------------------------------------------
-%% Vectorization Types
+%% Vectorization Direction
 %% ----------------------------------------------------
-\subsection*{Vectorization Types}
+\subsection{Vectorization Direction}
+Using these SIMD registers and operations, the DBMS can perform vectorized operations in two broad ways:
+\begin{itemize}
+	\item 
+	\textbf{Horizontal}: 
+	Operate on all elements together in a single vector. Useful for aggregation style queries like Sum. It is not commonly used and is only supported in AVX2 and up.
+	
+	\item 
+	\textbf{Vertical}: Perform operation in an element-wise manner on elements of each vector. It is helpful for a variety of queries like comparison or arithmetic operations and is widely used.
+        
+\end{itemize}
+
+%% ==================================================================
+%% Implementation Approaches
+%% ==================================================================
+\section{Implementation Approaches}
+\label{impl}
+
+The following are the broad categories of approaches to convert scalar operations to their vectorized versions:
 \begin{itemize}
 	\item  
 	\textbf{Automatic Vectorization}:
-	The compiler can identify when instructions inside of a loop can be rewritten as a vectorized operation.Works for simple loops only and is rare in database operators. Requires hardware support for SIMD instructions.
+	The compiler can identify when instructions inside of a loop can be rewritten as a vectorized operation. It works for simple operations only and is rare for database operators. However, the compiler is very conservative and will avoid converting to vector operations if there is any chance of it causing a correctness issue, E.g., Possibly overlapping pointers.
 	
 	\item  
 	\textbf{Compiler Hints}:
-	Provide the compiler with additional information about the code to let it know that is safe to vectorize.
-	Two approaches:
-	Give explicit information about memory locations.
-	Tell the compiler to ignore vector dependencies.
+	Provide the compiler with additional information about the code to inform it that it is safe to vectorize. The developer is responsible for providing correct hints/guidelines.
+	The following are two approaches to this:
+        \begin{itemize}
+            \item Give explicit information about memory locations. E.g., Using restrict keyword in C/C++. Very common in DBMS.
+	    \item Force the compiler to ignore vector dependencies. 
+        \end{itemize}
+	
 	
 	\item  
 	\textbf{Explicit Vectorization}:
-	Use CPU intrinsics to manually marshal data between SIMD registers and execute vectorized instructions.Potentially not portable.
+	Use CPU intrinsics to marshal data between SIMD registers and execute vectorized instructions manually. It is often not portable across ISA/versions unless you use an indirection library like Google Highway.
 	
-	Linear Access Operators→Predicate evaluation→Compression
-	Ad-hoc Vectorization→Sorting→Merging
-	Composable Operations→Multi-way trees→Bucketized hash tables
 \end{itemize}
 
-%% ----------------------------------------------------
-%% Vectorization Directions
-%% ----------------------------------------------------
-\subsection*{Vectorization Directions}
-There are two approaches on vectorization directions:
+The results from \cite{10.14778/3275366.3284966} using ICC (intel's compiler) indicate that although manual often performs best, it does not always lead to the smallest lines of code. The hybrid approach of letting the compiler auto-vectorize with hints and then optimize whatever is left manually often gives a good middle ground in terms of the amount of effort, performance, and lines of code.
+
+%% ==================================================================
+%% Vectorization Fundamentals
+%% ==================================================================
+\section{Vectorization Fundamentals}
+\label{fund}
+
+This section explains the new operations in AVX-512 in greater detail and how they can speed up computation \cite{10.1145/3211922.3211928}.
+
 \begin{itemize}
-	\item  
-	\textbf{Horizontal}:
-	Perform operation on all elements together within a single vector.
-	
-	\item 
-	\textbf{Vertical}:
-	Perform operation in an elementwise manner on elements of each vector.
+
+        \item 
+        \textbf{Masking}: Almost all AVX-512 operations support predication variants whereby the CPU only performs operations on lanes specified by an input bitmask. This avoids wasteful computation.
+        
+        \item 
+        \textbf{Permute}: For each lane, copy values in the input vector specified by the offset in the index vector into the destination vector. Before AVX-512, the DBMS had to write data from the SIMD register to memory and then back to the SIMD register, thus polluting the CPU cache.
+
+        \item 
+        \textbf{Selective Load}: Use a bitmask to load data from memory onto only the selected elements in the SIMD vector. 
+
+        \item 
+        \textbf{Selective Store}: Use a bitmask to store data in the memory from only the selected elements in the SIMD vector. 
+
+        \item 
+        \textbf{Compress}: Use a bitmask to store only the selected elements from an input vector onto a vector contiguously.
+
+        \item 
+        \textbf{Expand}: Use a bitmask to store the contiguous elements of an input onto the selected locations of another vector.
+
+        \item 
+        \textbf{Selective Gather}: Use an index vector to load the selected elements from memory onto a vector contiguously.
+
+        \item 
+        \textbf{Selective Scatter}: Use an index vector to store the contiguous elements from a vector onto the selected elements on memory.
 \end{itemize}
 
-%% ----------------------------------------------------
+Although AVX-512 is extremely useful because of the new operations, the extension has been split into different groups, and CPUs can selectively provide some or all of the groups. Older extensions like AVX2 were all or nothing and thus consistent. This forces DBMS to check the exact AVX-512 group supported by the hardware and choose the optimal algorithm accordingly. 
+
+Additionally, some CPUs downclock \cite{10.1145/3211922.3211928} the processor to avoid heating issues when running some AVX-512 instructions, which may lead to overall higher processing time. Hence, some DBMS choose to stick to AVX2.
+
+
+%% ==================================================================
 %% Vectorized DBMS Algorithms
-%% ----------------------------------------------------
-\subsection*{Vectorized DBMS Algorithms} 
-Principles for efficient vectorization by using fundamental vector operations to construct more advanced functionality~\cite{Polychroniou2015}. Favor vertical vectorization by processing different input data per lane. Maximize lane utilization by executing different things per lane subset.
-
-There are four fundamental vector operations:
+%% ==================================================================
+\section{Vectorized DBMS Algorithms} 
+\label{algo}
+This section will discuss the principles for efficient vectorization by using fundamental vector operations to construct more advanced functionality~\cite{Polychroniou2015}. The two basic ideas are as follows:
 \begin{itemize}
-	\item Selective Load
-	\item Selective Store
-	\item Selective Gather
-	\item Selective Scatter
+    \item We typically favor vertical vectorization by processing different input data per lane. Horizontal will also be used but has fewer applications.
+    \item Maximize lane utilization by executing unique data items per lane subset. Avoid useless computations on data known to be invalid.
+\end{itemize} 
+
+In particular, we will talk about vectorizing the following algorithms:
+
+%% ----------------------------------------------------
+%% Selection Scans
+%% ----------------------------------------------------
+\subsection{Selection Scans}
+Load data onto a SIMD vector and perform the predicate evaluation on the vector in parallel. Use the resulting bitmask to perform further operations on only the relevant data. Once the final bitmask is ready, use it to store the result. Minor optimizations can also be implemented to check if the entire vector becomes invalid after the operations. Auto vectorization of complex selection predicates is not trivial and often needs human intervention to be optimal.
+
+The results from \cite{10.14778/3275366.3284966} show that using SIMD instructions and hand-written optimal code over Scalar instructions can lead to a speedup of 10\% - 130\%  based on the type of operator for individual element processing. However, when queries are compared end to end, there is barely a 10\% improvement due to the limited portion of the query that can be vectorized and materialization overheads.
+
+%% ----------------------------------------------------
+%% Relaxed Operator Fusion
+%% ----------------------------------------------------
+\subsection{Relaxed Operator Fusion \cite{10.14778/3151113.3151114}}
+For each batch of tuples, the SIMD vectors may contain tuples that are no longer valid (they were disqualified by some previous check), which leads to underutilization.
+
+The idea behind Relaxed Operator Fusion (ROF) is to decompose the pipelines into stages that operate on vectors of tuples with artificial pipeline breakers. Each stage may contain multiple operators, which communicate through cache-resident buffers. Only move on to the next stage when the buffer is full; otherwise, keep processing the current stage.
+
+Another benefit of ROF is that it works well with software prefetching, thus hiding cache miss latency. The DBMS can tell the CPU to grab the next vector while it works on the current batch. Prefetch-enabled operators define the start of a new stage. Any prefetching technique, like group prefetching, works well with ROF and is simple to implement.
+
+%% ----------------------------------------------------
+%% Vector Refill Algorithms
+%% ----------------------------------------------------
+\subsection{Vector Refill Algorithms }
+The following are two approaches to refilling vectors using AVX-512 (possible due to the higher number of registers): 
+\begin{itemize}
+    \item \textbf{Buffered}: Use additional SIMD registers to stage results within an operator and proceed with the next loop iteration to fill in
+underutilized lane vectors.
+    \item \textbf{Partial}: Use additional SIMD registers to buffer results from underutilized vectors and then return to the previous operator
+to process the next vector. Requires fine-grained bookkeeping to make sure other operators do not clobber deferred vectors.
+\end{itemize}
+Not many systems do this because of the sheer complexity of implementing this and the overhead of the bookkeeping required.
+
+%% ----------------------------------------------------
+%% Hash Tables
+%% ----------------------------------------------------
+\subsection{Hash Tables}
+Linear probe hash tables are not typically suited to vector operations because they require arbitrary memory accesses. Two methods for vectorizing this is as follows:
+\begin{itemize}
+	\item 
+	\textbf{Horizontal}: 
+	Store multiple keys and values at each offset in the hash table. Use SIMD to compare the single input key to the multiple keys in the hash table location to find a match. It is not guaranteed to fully utilize the vector since key slots in the hash table may be empty.
+	
+	\item 
+	\textbf{Vertical}: Store a single key per vector slot. Use a SIMD gather to get key slots from memory to match. Replace the input keys that did match and offset the others by 1. This almost always results in complete utilization.
+        
 \end{itemize}
 
-Some issues of the opeartions are that 
-gathers and scatters are not really executed in parallel because the L1 cache only allows one or two distinct accesses per cycle.
-Gathers are only supported in newer CPUs.
-Selective loads and stores are also implemented in Xeon CPUs using vector permutations.
+The results indicate that vertical is better for most use cases, but both drop down to as slow as scalar when the hash table grows too large to fit in the cache.
 
-%% ----------------------------------------------------
-%% Vectorized Operators
-%% ----------------------------------------------------
-\subsection*{Vectorized Operators}
-Some vectorized operators~\cite{Polychroniou2015} include Sorting and Bloom filters. And four common ones are:
-\begin{itemize}
-	\item 
-	\textbf{Selection Scans}
-	
-	\item 
-	\textbf{Hash Tables}
-	
-	\item 
-	\textbf{Partitioning}
-	Use scatter and gathers to increment counts.
-	Replicate the histogram to handle collisions.
-	
-	\item 
-	\textbf{Joins}
-	No Partitioning: Build one shared hash table using atomics. Partially vectorized
-	Min Partitioning: Partition building table. Build one hash table per thread. Fully vectorized
-	Max Partitioning: Partition both tables repeatedly. Build and probe cache-resident hash tables. Fully vectorized
-\end{itemize}
+\subsection{Partitioning - Histogram}
+When building histograms for statistics, use scatter and gather to increment counts. However, since multiple keys may map to the same hash index and clobber each other, we replicate the histogram so that each SIMD vector slot updates only one column (essentially becomes a matrix where each column corresponds to one SIMD vector slot). Then, a SIMD add is done to get the final histogram values.
 
 % ==================================================================
 % BIBLIOGRAPHY
